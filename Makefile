@@ -1,21 +1,12 @@
-.PHONY: test example-v1 example-v2 upgrade-demo clean fmt vet
+.PHONY: test example clean fmt vet
 
 # Run tests
 test:
-	go test -v ./v1/debug/...
-	go test -v ./v2/debug/...
+	go test -v ./debug
 
-# Run V1 example
-example-v1:
-	cd v1/example && go run main.go
-
-# Run V2 example
-example-v2:
-	cd v2/example && go run main.go
-
-# Run upgrade demo
-upgrade-demo:
-	cd upgrade-demo && go run main.go
+# Run example
+example:
+	go run ./example/main.go
 
 # Format code
 fmt:
