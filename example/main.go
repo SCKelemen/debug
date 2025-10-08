@@ -369,55 +369,75 @@ func main() {
 	// ALL with INFO - should not log (neither flag allows INFO)
 	anyAllDM.LogWithAllFlagsAndSeverity(DebugAPIV1AuthLogin|DebugDBQuery, debug.SeverityInfo, "", "ALL INFO: Should not log")
 
-	fmt.Println("\n=== Example 12: V2 Logical Expressions ===")
-	dm.SetFlags("api.v1.auth.login,db.query,http.request")
-
-	// Simple expressions
-	dm.LogWithExpression("api.v1.auth.login", "V2: Simple flag expression")
-	dm.LogWithExpression("validation", "V2: Disabled flag (should not log)")
-
-	// OR expressions
-	dm.LogWithExpression("api.v1.auth.login|validation", "V2: OR expression (one enabled)")
-	dm.LogWithExpression("validation|http.request", "V2: OR expression (one enabled)")
-
-	// AND expressions
-	dm.LogWithExpression("api.v1.auth.login&db.query", "V2: AND expression (both enabled)")
-	dm.LogWithExpression("api.v1.auth.login&validation", "V2: AND expression (one disabled)")
-
-	// NOT expressions
-	dm.LogWithExpression("!validation", "V2: NOT expression (disabled flag)")
-	dm.LogWithExpression("!api.v1.auth.login", "V2: NOT expression (enabled flag)")
-
-	// Complex expressions with parentheses
-	dm.LogWithExpression("(api.v1.auth.login|validation)&db.query", "V2: Complex expression with parentheses")
-	dm.LogWithExpression("(http.request|validation)&api.v1.auth.login", "V2: Complex expression with parentheses")
-
-	// Operator precedence
-	dm.LogWithExpression("api.v1.auth.login|db.query&http.request", "V2: Operator precedence (AND before OR)")
-	dm.LogWithExpression("(api.v1.auth.login|db.query)&http.request", "V2: Explicit parentheses override precedence")
+	fmt.Println("\n=== Example 12: V2 Logical Expressions (Configuration Only) ===")
+	// V2 logical expressions are only used for flag configuration, not for logging calls
+	// The code should use exact flags, and logical expressions help users select which logs to see
+	
+	// Example: User can configure complex flag selection using logical expressions
+	dm.SetFlags("api.v1.auth.login|db.query&http.request") // Enable login OR (db.query AND http.request)
+	dm.Log(DebugAPIV1AuthLogin, "This will log because api.v1.auth.login is enabled")
+	dm.Log(DebugDBQuery, "This will log because db.query is enabled and http.request is enabled")
+	dm.Log(DebugHTTPRequest, "This will log because http.request is enabled")
+	
+	// Reset to simple flags for next examples
+	dm.SetFlags("api.v1.auth.login,db.query")
 
 	fmt.Println("\n=== Example 13: Slog Integration ===")
 	dm.SetFlags("api.v1.auth.login,db.query")
-	
+
 	// Traditional logging (default)
 	fmt.Println("Traditional logging:")
 	dm.Log(DebugAPIV1AuthLogin, "Traditional debug message")
 	dm.LogWithSeverity(DebugDBQuery, debug.SeverityError, "db-service", "Traditional error message")
-	
+
 	// Enable slog integration
 	fmt.Println("\nSlog integration:")
 	dm.EnableSlog()
 	dm.Log(DebugAPIV1AuthLogin, "Slog debug message")
 	dm.LogWithSeverity(DebugDBQuery, debug.SeverityError, "db-service", "Slog error message")
-	
+
 	// Custom slog handler (JSON output)
 	fmt.Println("\nSlog with JSON handler:")
 	dm.EnableSlogWithHandler(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	dm.Log(DebugAPIV1AuthLogin, "JSON slog message")
 	dm.LogWithSeverity(DebugDBQuery, debug.SeverityInfo, "db-service", "JSON slog info message")
-	
+
 	// Disable slog and return to traditional
 	dm.DisableSlog()
 	fmt.Println("\nBack to traditional logging:")
 	dm.Log(DebugAPIV1AuthLogin, "Back to traditional")
+
+	fmt.Println("\n=== Example 14: Context System ===")
+	dm.SetFlags("api.v1.auth.login,db.query")
+	
+	// Simulate API handler with context
+	fmt.Println("API handler with context:")
+	dm.WithContext(DebugAPIV1AuthLogin, func() {
+		dm.Log(DebugAPIV1AuthLogin, "Entering login handler")
+		
+		// Simulate database query within the handler
+		dm.Log(DebugDBQuery, "Executing user lookup query")
+		
+		// Nested context (e.g., validation within login)
+		dm.WithContext(DebugValidation, func() {
+			dm.Log(DebugValidation, "Validating user credentials")
+			dm.Log(DebugDBQuery, "Querying user permissions")
+		})
+		
+		dm.Log(DebugAPIV1AuthLogin, "Login handler completed")
+	})
+	
+	// Manual context management
+	fmt.Println("\nManual context management:")
+	dm.PushContext(DebugAPIV1AuthLogin)
+	dm.Log(DebugDBQuery, "DB query in login context")
+	dm.PopContext()
+	
+	// Show context stack
+	fmt.Println("\nContext stack operations:")
+	dm.PushContext(DebugAPIV1AuthLogin)
+	dm.PushContext(DebugDBQuery)
+	fmt.Printf("Current context: %d\n", dm.GetContext())
+	dm.Log(DebugValidation, "Validation with multiple context flags")
+	dm.ClearContext()
 }

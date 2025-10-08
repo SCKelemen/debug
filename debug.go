@@ -90,8 +90,9 @@ type DebugManager struct {
 	flagMap             map[string]DebugFlag
 	pathMap             map[DebugFlag]string
 	allFlags            []DebugFlag
-	logger               *slog.Logger
-	useSlog              bool
+	logger              *slog.Logger
+	useSlog             bool
+	contextStack        []DebugFlag // Stack for hierarchical context
 }
 
 // NewDebugManager creates a new debug manager
@@ -107,6 +108,7 @@ func NewDebugManager() *DebugManager {
 		allFlags:            []DebugFlag{},
 		logger:              slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		useSlog:             false, // Default to traditional logging
+		contextStack:        []DebugFlag{}, // Initialize empty context stack
 	}
 }
 
@@ -361,7 +363,7 @@ func (dm *DebugManager) LogWithContext(flag DebugFlag, context string, format st
 func (dm *DebugManager) LogWithSeverity(flag DebugFlag, severity Severity, context string, format string, args ...interface{}) {
 	if dm.shouldLog(flag, severity) {
 		message := fmt.Sprintf(format, args...)
-		path := dm.pathMap[flag]
+		path := dm.getPathWithContext(flag)
 
 		if dm.useSlog {
 			// Use structured logging with slog
@@ -461,33 +463,9 @@ func (dm *DebugManager) LogWithAllFlagsAndSeverity(flags DebugFlag, severity Sev
 	}
 }
 
-// V2 Logical Expression Methods
-
-// LogWithExpression logs a message if the logical expression evaluates to true
-// V2 feature: supports logical operators (|, &, !, parentheses)
-// Example: LogWithExpression("api.v1.auth.login|db.query&http.request", "message")
-func (dm *DebugManager) LogWithExpression(expression string, format string, args ...interface{}) {
-	dm.LogWithExpressionAndSeverity(expression, SeverityDebug, "", format, args...)
-}
-
-// LogWithExpressionAndSeverity logs a message with severity if the logical expression evaluates to true
-func (dm *DebugManager) LogWithExpressionAndSeverity(expression string, severity Severity, context string, format string, args ...interface{}) {
-	if dm.shouldLogWithExpression(expression, severity) {
-		message := fmt.Sprintf(format, args...)
-		path := expression // Use the expression as the path for V2
-
-		if context != "" {
-			fmt.Fprintf(os.Stderr, "%s [%s] %s: %s\n", severity.String(), path, context, message)
-		} else {
-			fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), path, message)
-		}
-	}
-}
-
-// LogWithExpressionAndContext logs a message with context if the logical expression evaluates to true
-func (dm *DebugManager) LogWithExpressionAndContext(expression string, context string, format string, args ...interface{}) {
-	dm.LogWithExpressionAndSeverity(expression, SeverityDebug, context, format, args...)
-}
+// Note: LogWithExpression methods were removed as they were based on incorrect understanding.
+// Logical expressions should only be used for flag configuration, not for logging calls.
+// Use exact flags in code and logical expressions only in SetFlags() for user convenience.
 
 // LogWithPath writes a debug message with a specific path
 func (dm *DebugManager) LogWithPath(path string, severity Severity, context string, format string, args ...interface{}) {
@@ -504,8 +482,11 @@ func (dm *DebugManager) LogWithPath(path string, severity Severity, context stri
 
 // shouldLog determines if a message should be logged based on flag and severity
 func (dm *DebugManager) shouldLog(flag DebugFlag, severity Severity) bool {
-	// Check if flag is enabled
-	if !dm.IsEnabled(flag) {
+	// Combine the flag with current context
+	combinedFlag := flag | dm.GetContext()
+	
+	// Check if the combined flag (including context) is enabled
+	if !dm.IsEnabled(combinedFlag) {
 		return false
 	}
 
@@ -645,36 +626,7 @@ func (dm *DebugManager) shouldLogWithAllFlags(flags DebugFlag, severity Severity
 	return false
 }
 
-// shouldLogWithExpression determines if a message should be logged based on a logical expression
-func (dm *DebugManager) shouldLogWithExpression(expression string, severity Severity) bool {
-	// Parse the logical expression
-	node, err := dm.parseLogicalExpression(expression)
-	if err != nil {
-		// If parsing fails, don't log
-		return false
-	}
-
-	// Evaluate the expression
-	result, err := dm.evaluateExpression(node)
-	if err != nil {
-		// If evaluation fails, don't log
-		return false
-	}
-
-	// If expression evaluates to false, don't log
-	if !result {
-		return false
-	}
-
-	// Apply severity filtering
-	// For V2 expressions, we use global severity filtering for simplicity
-	// In a full implementation, we might want more sophisticated severity handling
-	if severity < dm.severityFilter {
-		return false
-	}
-
-	return true
-}
+// Note: shouldLogWithExpression was removed as logical expressions should only be used for flag configuration.
 
 // getFirstFlagFromExpression extracts the first flag from an expression node
 func (dm *DebugManager) getFirstFlagFromExpression(node *ExpressionNode) string {
@@ -1095,6 +1047,72 @@ func (dm *DebugManager) DisableSlog() {
 // IsSlogEnabled returns whether slog integration is enabled
 func (dm *DebugManager) IsSlogEnabled() bool {
 	return dm.useSlog
+}
+
+// Context Management Methods
+
+// PushContext adds a flag to the context stack
+// This is useful for hierarchical logging where child operations inherit parent context
+func (dm *DebugManager) PushContext(flag DebugFlag) {
+	dm.contextStack = append(dm.contextStack, flag)
+}
+
+// PopContext removes the most recent flag from the context stack
+func (dm *DebugManager) PopContext() DebugFlag {
+	if len(dm.contextStack) == 0 {
+		return 0
+	}
+	
+	lastIndex := len(dm.contextStack) - 1
+	flag := dm.contextStack[lastIndex]
+	dm.contextStack = dm.contextStack[:lastIndex]
+	return flag
+}
+
+// GetContext returns the current context (combination of all flags in the stack)
+func (dm *DebugManager) GetContext() DebugFlag {
+	var context DebugFlag
+	for _, flag := range dm.contextStack {
+		context |= flag
+	}
+	return context
+}
+
+// ClearContext clears the entire context stack
+func (dm *DebugManager) ClearContext() {
+	dm.contextStack = []DebugFlag{}
+}
+
+// WithContext executes a function with a temporary context
+// The context is automatically popped when the function returns
+func (dm *DebugManager) WithContext(flag DebugFlag, fn func()) {
+	dm.PushContext(flag)
+	defer dm.PopContext()
+	fn()
+}
+
+// getPathWithContext returns the path string including context information
+func (dm *DebugManager) getPathWithContext(flag DebugFlag) string {
+	path := dm.pathMap[flag]
+	if path == "" {
+		path = "unknown"
+	}
+	
+	// Add context information if available
+	context := dm.GetContext()
+	if context != 0 {
+		var contextPaths []string
+		for _, ctxFlag := range dm.contextStack {
+			if ctxPath := dm.pathMap[ctxFlag]; ctxPath != "" {
+				contextPaths = append(contextPaths, ctxPath)
+			}
+		}
+		if len(contextPaths) > 0 {
+			path = fmt.Sprintf("%s (ctx: %s)", path, strings.Join(contextPaths, " -> "))
+		}
+	}
+	
+	return path
 }
 
 // severityToSlogLevel converts our Severity to slog.Level

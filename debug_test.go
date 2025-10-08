@@ -1585,66 +1585,8 @@ func TestAnyVsAllWithSeverity(t *testing.T) {
 	}
 }
 
-func TestV2LogicalExpressions(t *testing.T) {
-	dm := NewDebugManager()
-	dm.RegisterFlags([]FlagDefinition{
-		{TestFlag1, "api.v1.auth.login", "api.v1.auth.login"},
-		{TestFlag2, "db.query", "db.query"},
-		{TestFlag3, "http.request", "http.request"},
-		{TestFlag4, "validation", "validation"},
-	})
-
-	// Enable some flags
-	err := dm.SetFlags("api.v1.auth.login,db.query")
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	// Capture stderr
-	oldStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
-
-	// Test V2 logical expressions
-	dm.LogWithExpression("api.v1.auth.login", "V2: Simple flag expression")
-	dm.LogWithExpression("api.v1.auth.login|db.query", "V2: OR expression")
-	dm.LogWithExpression("api.v1.auth.login&db.query", "V2: AND expression")
-	dm.LogWithExpression("!validation", "V2: NOT expression")
-	dm.LogWithExpression("(api.v1.auth.login|http.request)&db.query", "V2: Complex expression with parentheses")
-	dm.LogWithExpression("http.request&db.query", "V2: AND expression that should not log")
-
-	w.Close()
-	os.Stderr = oldStderr
-
-	// Read captured output
-	buf := make([]byte, 1024)
-	n, _ := r.Read(buf)
-	output := string(buf[:n])
-
-	// Check expected messages
-	expectedMessages := []string{
-		"V2: Simple flag expression",
-		"V2: OR expression",
-		"V2: AND expression",
-		"V2: NOT expression",
-		"V2: Complex expression with parentheses",
-	}
-	unexpectedMessages := []string{
-		"V2: AND expression that should not log",
-	}
-
-	for _, msg := range expectedMessages {
-		if !strings.Contains(output, msg) {
-			t.Errorf("Expected message '%s' to be logged", msg)
-		}
-	}
-
-	for _, msg := range unexpectedMessages {
-		if strings.Contains(output, msg) {
-			t.Errorf("Expected message '%s' to not be logged", msg)
-		}
-	}
-}
+// Note: TestV2LogicalExpressions was removed as LogWithExpression methods were removed.
+// V2 logical expressions are only used for flag configuration, not for logging calls.
 
 func TestSlogIntegration(t *testing.T) {
 	dm := NewDebugManager()
@@ -1693,5 +1635,96 @@ func TestSlogIntegration(t *testing.T) {
 	dm.DisableSlog()
 	if dm.IsSlogEnabled() {
 		t.Errorf("Expected slog to be disabled")
+	}
+}
+
+func TestContextSystem(t *testing.T) {
+	dm := NewDebugManager()
+	dm.RegisterFlags([]FlagDefinition{
+		{TestFlag1, "api.v1.auth.login", "api.v1.auth.login"},
+		{TestFlag2, "db.query", "db.query"},
+		{TestFlag3, "validation", "validation"},
+	})
+
+	// Enable some flags
+	dm.SetFlags("api.v1.auth.login,db.query,validation")
+
+	// Test WithContext
+	var output1 string
+	dm.WithContext(TestFlag1, func() {
+		// Capture output
+		oldStderr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+
+		dm.Log(TestFlag2, "DB query in login context")
+		w.Close()
+		os.Stderr = oldStderr
+
+		buf := make([]byte, 1024)
+		n, _ := r.Read(buf)
+		output1 = string(buf[:n])
+	})
+
+	// Check that context was included in output
+	if !strings.Contains(output1, "ctx: api.v1.auth.login") {
+		t.Errorf("Expected context to be included in output, got: %s", output1)
+	}
+
+	// Test manual context management
+	dm.PushContext(TestFlag1)
+	dm.PushContext(TestFlag2)
+	
+	context := dm.GetContext()
+	expectedContext := TestFlag1 | TestFlag2
+	if context != expectedContext {
+		t.Errorf("Expected context %d, got %d", expectedContext, context)
+	}
+
+	// Test PopContext
+	popped := dm.PopContext()
+	if popped != TestFlag2 {
+		t.Errorf("Expected to pop TestFlag2 (%d), got %d", TestFlag2, popped)
+	}
+
+	// Test ClearContext
+	dm.ClearContext()
+	if dm.GetContext() != 0 {
+		t.Errorf("Expected context to be cleared, got %d", dm.GetContext())
+	}
+}
+
+func TestContextInheritance(t *testing.T) {
+	dm := NewDebugManager()
+	dm.RegisterFlags([]FlagDefinition{
+		{TestFlag1, "api.v1.auth.login", "api.v1.auth.login"},
+		{TestFlag2, "db.query", "db.query"},
+		{TestFlag3, "validation", "validation"},
+	})
+
+	dm.SetFlags("api.v1.auth.login,db.query,validation")
+
+	// Test nested context
+	var output string
+	dm.WithContext(TestFlag1, func() {
+		dm.WithContext(TestFlag3, func() {
+			// Capture output
+			oldStderr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
+
+			dm.Log(TestFlag2, "DB query in nested context")
+			w.Close()
+			os.Stderr = oldStderr
+
+			buf := make([]byte, 1024)
+			n, _ := r.Read(buf)
+			output = string(buf[:n])
+		})
+	})
+
+	// Check that both contexts are included
+	if !strings.Contains(output, "ctx: api.v1.auth.login -> validation") {
+		t.Errorf("Expected nested context to be included, got: %s", output)
 	}
 }
