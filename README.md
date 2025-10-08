@@ -1,54 +1,112 @@
 # Debug - A Flexible Debug Flag System for Go
 
-A powerful and flexible debug flag system for Go applications that supports hierarchical flag organization, glob pattern matching, and severity-based filtering.
+A powerful and flexible debug flag system for Go applications that supports hierarchical flag organization, glob pattern matching, severity-based filtering, logical expressions, and context management.
+
+**Note**: This is a private prototype library for internal use only.
+
+## Package Structure
+
+This library provides two versions:
+
+- **`v1`**: Simple configuration with comma-separated flags and globs
+- **`v2`**: Advanced configuration with logical expressions (`|`, `&`, `!`, `()`) plus all V1 features
+
+Both versions share the same API and are fully compatible.
 
 ## Features
 
 - **Bitflag-based**: Efficient flag management using bitwise operations
 - **Hierarchical Organization**: Organize flags into logical trees (e.g., `http.request`, `db.query`)
 - **Glob Pattern Matching**: Enable multiple flags using patterns like `http.*` or `db.*`
-- **Severity Filtering**: Control output based on message severity levels
-- **Context Support**: Add contextual information to debug messages
+- **Path-based Severity Filtering**: Filter log messages by severity level for specific paths
+- **Multi-Flag Logging**: Log based on combinations of flags with explicit ANY/ALL logic
+- **Logical Expressions (V2)**: Advanced flag configuration with logical operators (`|`, `&`, `!`, `()`)
+- **Slog Integration**: Structured logging with Go's standard `log/slog` package
+- **Context Support**: Add contextual information to debug messages with hierarchical inheritance
 - **Flexible Registration**: Register custom flags for your application
 - **Zero Dependencies**: Pure Go implementation with no external dependencies
 
 ## Installation
 
 ```bash
-go get github.com/SCKelemen/debug
+# For V1 (simple configuration)
+go get github.com/SCKelemen/debug/v1
+
+# For V2 (logical expressions)
+go get github.com/SCKelemen/debug/v2
 ```
 
 ## Quick Start
+
+### V1 (Simple Configuration)
 
 ```go
 package main
 
 import (
-    "github.com/SCKelemen/debug"
+    "github.com/SCKelemen/debug/v1"
 )
 
 // Define your debug flags
 const (
-    DebugHTTPRequest  debug.DebugFlag = 1 << iota
+    DebugHTTPRequest  v1.DebugFlag = 1 << iota
     DebugHTTPResponse
     DebugDBQuery
     DebugValidation
 )
 
 func main() {
-    // Create debug manager
-    dm := debug.NewDebugManager()
+    // Create V1 debug manager
+    dm := v1.NewDebugManager()
     
     // Register flags
-    dm.RegisterFlags([]debug.FlagDefinition{
-        {DebugHTTPRequest, "http.request", "http.request"},
-        {DebugHTTPResponse, "http.response", "http.response"},
-        {DebugDBQuery, "db.query", "db.query"},
-        {DebugValidation, "validation", "validation"},
+    dm.RegisterFlags([]v1.FlagDefinition{
+        {Flag: DebugHTTPRequest, Name: "http.request", Path: "http.request"},
+        {Flag: DebugHTTPResponse, Name: "http.response", Path: "http.response"},
+        {Flag: DebugDBQuery, Name: "db.query", Path: "db.query"},
+        {Flag: DebugValidation, Name: "validation", Path: "validation"},
     })
     
-    // Enable flags using glob patterns
+    // Enable flags using comma-separated patterns
     dm.SetFlags("http.*,db.query")
+    
+    // Log debug messages
+    dm.Log(DebugHTTPRequest, "Processing request to /api/users")
+    dm.Log(DebugDBQuery, "Executing SELECT * FROM users")
+}
+```
+
+### V2 (Logical Expressions)
+
+```go
+package main
+
+import (
+    "github.com/SCKelemen/debug/v2"
+)
+
+// Define your debug flags
+const (
+    DebugHTTPRequest  v2.DebugFlag = 1 << iota
+    DebugHTTPResponse
+    DebugDBQuery
+    DebugValidation
+)
+
+func main() {
+    // Create V2 debug manager
+    dm := v2.NewDebugManager()
+    
+    // Register flags
+    dm.RegisterFlags([]v2.FlagDefinition{
+        {Flag: DebugHTTPRequest, Name: "http.request", Path: "http.request"},
+        {Flag: DebugHTTPResponse, Name: "http.response", Path: "http.response"},
+        {Flag: DebugDBQuery, Name: "db.query", Path: "db.query"},
+        {Flag: DebugValidation, Name: "validation", Path: "validation"},
+    })
+    
+    // Enable flags using logical expressions
+    dm.SetFlags("http.request|db.query")
     
     // Log debug messages
     dm.Log(DebugHTTPRequest, "Processing request to /api/users")
