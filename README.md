@@ -105,7 +105,8 @@ func main() {
     })
     
     // Enable flags using logical expressions
-    dm.SetFlags("http.request|db.query")
+    dm.SetFlags("http.request|db.query")     // V2 logical OR
+    dm.SetFlags("http.request,db.query")     // V1 syntax (equivalent in V2)
     
     // Log debug messages
     dm.Log(DebugHTTPRequest, "Processing request to /api/users")
@@ -132,6 +133,7 @@ import "github.com/SCKelemen/debug/v2/debug"
 dm := debug.NewDebugManager()
 dm.SetFlags("http.*,db.query")  // Still works!
 dm.SetFlags("http.request|db.query")  // Now you can also use logical expressions
+dm.SetFlags("http.request,db.query")  // V1 syntax (equivalent to above in V2)
 ```
 
 ### Benefits of Upgrading
