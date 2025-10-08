@@ -318,6 +318,89 @@ dm.SetFlags("auth.*:TRACE,payment:ERROR")
 dm.SetFlags("api.*:ERROR,internal.*:DEBUG,external.*:+INFO")
 ```
 
+### Deep Hierarchical Nesting
+
+The debug system excels at handling deeply nested hierarchical structures, perfect for complex applications with multiple API versions, modules, and sub-modules.
+
+#### Flag Organization Pattern
+
+```go
+const (
+    // API section with proper nesting
+    debugAPIStart DebugFlag = 1 << iota
+    DebugAPIV1Start
+    DebugAPIV1AuthStart
+    DebugAPIV1AuthLogin
+    DebugAPIV1AuthLogout
+    DebugAPIV1AuthRenewLease
+    debugAPIV1AuthEnd
+    debugAPIV1End
+    DebugAPIV2Start
+    DebugAPIV2AuthStart
+    DebugAPIV2AuthLogin
+    DebugAPIV2AuthLogout
+    DebugAPIV2AuthRenewLease
+    debugAPIV2AuthEnd
+    debugAPIV2End
+    debugAPIEnd
+)
+
+// Register with hierarchical paths
+flagDefinitions := []debug.FlagDefinition{
+    {Flag: DebugAPIV1AuthLogin, Name: "api.v1.auth.login", Path: "api.v1.auth.login"},
+    {Flag: DebugAPIV1AuthLogout, Name: "api.v1.auth.logout", Path: "api.v1.auth.logout"},
+    {Flag: DebugAPIV2AuthLogin, Name: "api.v2.auth.login", Path: "api.v2.auth.login"},
+    {Flag: DebugAPIV2AuthLogout, Name: "api.v2.auth.logout", Path: "api.v2.auth.logout"},
+    // ... more flags
+}
+```
+
+#### Hierarchical Glob Patterns
+
+| Pattern | Matches | Example Paths |
+|---------|---------|---------------|
+| `api.*` | All API v1 operations | `api.v1.auth.login`, `api.v1.auth.logout` |
+| `api.**` | All API operations (any depth) | `api.v1.auth.login`, `api.v2.auth.login` |
+| `api.v1.*` | All v1 operations | `api.v1.auth.login`, `api.v1.auth.logout` |
+| `api.v1.**` | All v1 operations (any depth) | `api.v1.auth.login`, `api.v1.auth.renewLease` |
+| `api.v1.auth.*` | All v1 auth operations | `api.v1.auth.login`, `api.v1.auth.logout` |
+| `api.**.auth.*` | All auth operations across versions | `api.v1.auth.login`, `api.v2.auth.login` |
+
+#### Complex Configuration Examples
+
+```go
+// Enable all auth operations across all API versions
+dm.SetFlags("api.**.auth.*")
+
+// Different severity levels for different API versions
+dm.SetFlags("api.v1.auth.*:ERROR,api.v2.auth.*:+WARN")
+
+// Production configuration for microservices
+dm.SetFlags("api.v1.*:ERROR,api.v2.*:ERROR,internal.*:DEBUG")
+
+// Development debugging specific module
+dm.SetFlags("api.v1.auth.*:TRACE,api.v2.auth.*:DEBUG,api.*:INFO")
+
+// Mixed configuration with fallbacks
+dm.SetFlags("api.v1.auth.*:ERROR,api.v2.auth.*:+WARN,api.*:+INFO")
+```
+
+#### Environment Variable Examples
+
+```bash
+# Production: only errors for all APIs
+export DEBUG_FLAGS="api.*:ERROR"
+
+# Development: detailed auth logging, errors for everything else
+export DEBUG_FLAGS="api.**.auth.*:DEBUG,api.*:ERROR"
+
+# Debugging: trace auth, debug API, info for everything else
+export DEBUG_FLAGS="api.**.auth.*:TRACE,api.*:DEBUG,*:INFO"
+
+# Version-specific debugging
+export DEBUG_FLAGS="api.v1.*:DEBUG,api.v2.*:ERROR"
+```
+
 ### Performance Considerations
 
 - Flag checking uses bitwise operations for maximum performance

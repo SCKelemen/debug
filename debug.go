@@ -74,21 +74,21 @@ type SeverityFilter struct {
 type SeverityFilterType int
 
 const (
-	SeverityFilterAll SeverityFilterType = iota // Show all severities
-	SeverityFilterMin                            // Show minimum severity and above
-	SeverityFilterSpecific                       // Show only specific severities
+	SeverityFilterAll      SeverityFilterType = iota // Show all severities
+	SeverityFilterMin                                // Show minimum severity and above
+	SeverityFilterSpecific                           // Show only specific severities
 )
 
 // DebugManager manages debug flags and output
 type DebugManager struct {
-	flags              DebugFlag
-	severityFilter     Severity
-	pathFilters        []string
+	flags               DebugFlag
+	severityFilter      Severity
+	pathFilters         []string
 	pathSeverityFilters []PathSeverityFilter
-	globEnabled        bool
-	flagMap            map[string]DebugFlag
-	pathMap            map[DebugFlag]string
-	allFlags           []DebugFlag
+	globEnabled         bool
+	flagMap             map[string]DebugFlag
+	pathMap             map[DebugFlag]string
+	allFlags            []DebugFlag
 }
 
 // NewDebugManager creates a new debug manager
