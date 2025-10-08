@@ -174,7 +174,7 @@ func (p *V1Parser) matchesGlob(path, pattern string) bool {
 		if len(parts) == 2 {
 			prefix := strings.TrimSuffix(parts[0], ".")
 			suffix := strings.TrimPrefix(parts[1], ".")
-			
+
 			if prefix != "" && !strings.HasPrefix(path, prefix) {
 				return false
 			}
@@ -184,7 +184,7 @@ func (p *V1Parser) matchesGlob(path, pattern string) bool {
 			return true
 		}
 	}
-	
+
 	// Use standard filepath.Match for other patterns
 	matched, _ := filepath.Match(pattern, path)
 	return matched

@@ -36,7 +36,7 @@ func main() {
 
 	// Example 2: V2 Parser with logical expressions
 	fmt.Println("=== V2 Parser Example ===")
-	dm2 := debug.NewDebugManager(v2parser.NewV2Parser())
+	dm2 := debug.NewDebugManager(v2parser.NewParser())
 	dm2.RegisterFlags(flagDefs)
 	dm2.SetFlags("http.request|db.query")
 
@@ -50,7 +50,7 @@ func main() {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
-	dm3 := debug.NewDebugManagerWithSlogHandler(v2parser.NewV2Parser(), handler)
+	dm3 := debug.NewDebugManagerWithSlogHandler(v2parser.NewParser(), handler)
 	dm3.RegisterFlags(flagDefs)
 	dm3.SetFlags("api.v1.*|api.v2.*")
 
@@ -61,7 +61,7 @@ func main() {
 
 	// Example 4: V2 with complex logical expressions
 	fmt.Println("=== V2 Complex Logical Expressions ===")
-	dm4 := debug.NewDebugManager(v2parser.NewV2Parser())
+	dm4 := debug.NewDebugManager(v2parser.NewParser())
 	dm4.RegisterFlags(flagDefs)
 	dm4.SetFlags("(http.request|http.response)&api.v1.*")
 
@@ -73,7 +73,7 @@ func main() {
 
 	// Example 5: V2 with V1 compatibility
 	fmt.Println("=== V2 with V1 Compatibility ===")
-	dm5 := debug.NewDebugManager(v2parser.NewV2Parser())
+	dm5 := debug.NewDebugManager(v2parser.NewParser())
 	dm5.RegisterFlags(flagDefs)
 	dm5.SetFlags("http.request,db.query") // V1 syntax in V2 parser
 

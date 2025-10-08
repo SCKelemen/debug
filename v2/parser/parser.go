@@ -8,16 +8,16 @@ import (
 	debug "github.com/SCKelemen/debug"
 )
 
-// V2Parser implements FlagParser for logical expression flag strings
-type V2Parser struct{}
+// Parser implements FlagParser for logical expression flag strings
+type Parser struct{}
 
-// NewV2Parser creates a new V2 parser
-func NewV2Parser() debug.FlagParser {
-	return &V2Parser{}
+// NewParser creates a new parser
+func NewParser() debug.FlagParser {
+	return &Parser{}
 }
 
 // ParseFlags parses logical expression flag strings (V2 - with logical expressions)
-func (p *V2Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, []debug.PathSeverityFilter, error) {
+func (p *Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, []debug.PathSeverityFilter, error) {
 	var enabledFlags debug.DebugFlag
 	var pathSeverityFilters []debug.PathSeverityFilter
 
@@ -73,15 +73,15 @@ type ExpressionNode struct {
 type NodeType int
 
 const (
-	NodeFlag     NodeType = iota // Flag name
-	NodeAnd                      // AND operation
-	NodeOr                       // OR operation
-	NodeNot                      // NOT operation
-	NodeGroup                    // Parentheses grouping
+	NodeFlag  NodeType = iota // Flag name
+	NodeAnd                   // AND operation
+	NodeOr                    // OR operation
+	NodeNot                   // NOT operation
+	NodeGroup                 // Parentheses grouping
 )
 
 // parseLogicalExpression parses a logical expression and returns enabled flags
-func (p *V2Parser) parseLogicalExpression(expr string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
+func (p *Parser) parseLogicalExpression(expr string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
 	// Parse V2 logical expression
 	node, err := p.parseV2Expression(strings.TrimSpace(expr))
 	if err != nil {
@@ -93,32 +93,32 @@ func (p *V2Parser) parseLogicalExpression(expr string, flagMap map[string]debug.
 }
 
 // parseV1Expression parses comma-separated flags into an OR expression
-func (p *V2Parser) parseV1Expression(expr string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
+func (p *Parser) parseV1Expression(expr string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
 	var enabledFlags debug.DebugFlag
 	flagNames := strings.Split(expr, ",")
-	
+
 	for _, flagName := range flagNames {
 		flagName = strings.TrimSpace(flagName)
 		if flagName == "" {
 			continue
 		}
-		
+
 		if err := p.enableFlagsForPattern(flagName, flagMap, pathMap, &enabledFlags); err != nil {
 			return 0, err
 		}
 	}
-	
+
 	return enabledFlags, nil
 }
 
 // parseV2Expression parses a V2 logical expression
-func (p *V2Parser) parseV2Expression(expr string) (*ExpressionNode, error) {
+func (p *Parser) parseV2Expression(expr string) (*ExpressionNode, error) {
 	// Parse OR expressions (lowest precedence)
 	return p.parseOrExpression(expr)
 }
 
 // parseOrExpression parses OR expressions
-func (p *V2Parser) parseOrExpression(expr string) (*ExpressionNode, error) {
+func (p *Parser) parseOrExpression(expr string) (*ExpressionNode, error) {
 	// Find the rightmost OR operator (right associativity)
 	pos := p.findOperatorRightToLeft(expr, "|")
 	if pos == -1 {
@@ -142,7 +142,7 @@ func (p *V2Parser) parseOrExpression(expr string) (*ExpressionNode, error) {
 }
 
 // parseAndExpression parses AND expressions
-func (p *V2Parser) parseAndExpression(expr string) (*ExpressionNode, error) {
+func (p *Parser) parseAndExpression(expr string) (*ExpressionNode, error) {
 	// Find the rightmost AND operator (right associativity)
 	pos := p.findOperatorRightToLeft(expr, "&")
 	if pos == -1 {
@@ -166,7 +166,7 @@ func (p *V2Parser) parseAndExpression(expr string) (*ExpressionNode, error) {
 }
 
 // parseNotExpression parses NOT expressions
-func (p *V2Parser) parseNotExpression(expr string) (*ExpressionNode, error) {
+func (p *Parser) parseNotExpression(expr string) (*ExpressionNode, error) {
 	expr = strings.TrimSpace(expr)
 	if strings.HasPrefix(expr, "!") {
 		child, err := p.parseNotExpression(expr[1:])
@@ -183,7 +183,7 @@ func (p *V2Parser) parseNotExpression(expr string) (*ExpressionNode, error) {
 }
 
 // parsePrimaryExpression parses primary expressions (flags and parentheses)
-func (p *V2Parser) parsePrimaryExpression(expr string) (*ExpressionNode, error) {
+func (p *Parser) parsePrimaryExpression(expr string) (*ExpressionNode, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
 		return nil, fmt.Errorf("empty expression")
@@ -221,7 +221,7 @@ func (p *V2Parser) parsePrimaryExpression(expr string) (*ExpressionNode, error) 
 }
 
 // findOperatorRightToLeft finds the rightmost occurrence of an operator
-func (p *V2Parser) findOperatorRightToLeft(expr, op string) int {
+func (p *Parser) findOperatorRightToLeft(expr, op string) int {
 	level := 0
 	for i := len(expr) - 1; i >= 0; i-- {
 		char := expr[i]
@@ -237,7 +237,7 @@ func (p *V2Parser) findOperatorRightToLeft(expr, op string) int {
 }
 
 // evaluateExpression evaluates the expression AST and returns enabled flags
-func (p *V2Parser) evaluateExpression(node *ExpressionNode, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
+func (p *Parser) evaluateExpression(node *ExpressionNode, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
 	switch node.Type {
 	case NodeFlag:
 		return p.evaluateFlag(node.Value, flagMap, pathMap)
@@ -292,7 +292,7 @@ func (p *V2Parser) evaluateExpression(node *ExpressionNode, flagMap map[string]d
 }
 
 // evaluateFlag evaluates a single flag or glob pattern
-func (p *V2Parser) evaluateFlag(flagName string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
+func (p *Parser) evaluateFlag(flagName string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
 	var enabledFlags debug.DebugFlag
 	if err := p.enableFlagsForPattern(flagName, flagMap, pathMap, &enabledFlags); err != nil {
 		return 0, err
@@ -301,7 +301,7 @@ func (p *V2Parser) evaluateFlag(flagName string, flagMap map[string]debug.DebugF
 }
 
 // parseFlagWithSeverity parses a flag string that may contain severity filtering
-func (p *V2Parser) parseFlagWithSeverity(flagStr string) (string, *debug.SeverityFilter, error) {
+func (p *Parser) parseFlagWithSeverity(flagStr string) (string, *debug.SeverityFilter, error) {
 	parts := strings.SplitN(flagStr, ":", 2)
 	if len(parts) != 2 {
 		// No severity filter, return the flag as-is
@@ -324,7 +324,7 @@ func (p *V2Parser) parseFlagWithSeverity(flagStr string) (string, *debug.Severit
 }
 
 // parseSeverityFilter parses a severity filter string
-func (p *V2Parser) parseSeverityFilter(severityStr string) (*debug.SeverityFilter, error) {
+func (p *Parser) parseSeverityFilter(severityStr string) (*debug.SeverityFilter, error) {
 	// Handle multiple severities with | (e.g., "ERROR|INFO")
 	if strings.Contains(severityStr, "|") {
 		severities := make(map[debug.Severity]bool)
@@ -370,7 +370,7 @@ func (p *V2Parser) parseSeverityFilter(severityStr string) (*debug.SeverityFilte
 }
 
 // parseSeverity converts a string to a Severity
-func (p *V2Parser) parseSeverity(severityStr string) (debug.Severity, error) {
+func (p *Parser) parseSeverity(severityStr string) (debug.Severity, error) {
 	switch strings.ToUpper(severityStr) {
 	case "TRACE":
 		return debug.SeverityTrace, nil
@@ -390,7 +390,7 @@ func (p *V2Parser) parseSeverity(severityStr string) (debug.Severity, error) {
 }
 
 // enableFlagsForPattern enables flags matching the given pattern
-func (p *V2Parser) enableFlagsForPattern(pattern string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string, enabledFlags *debug.DebugFlag) error {
+func (p *Parser) enableFlagsForPattern(pattern string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string, enabledFlags *debug.DebugFlag) error {
 	// Check if it's a direct flag name
 	if flag, exists := flagMap[pattern]; exists {
 		*enabledFlags |= flag
@@ -414,7 +414,7 @@ func (p *V2Parser) enableFlagsForPattern(pattern string, flagMap map[string]debu
 }
 
 // matchesGlob checks if a path matches a glob pattern
-func (p *V2Parser) matchesGlob(path, pattern string) bool {
+func (p *Parser) matchesGlob(path, pattern string) bool {
 	// Handle ** pattern (recursive match)
 	if strings.Contains(pattern, "**") {
 		// Convert ** pattern to a more flexible matching
@@ -422,7 +422,7 @@ func (p *V2Parser) matchesGlob(path, pattern string) bool {
 		if len(parts) == 2 {
 			prefix := strings.TrimSuffix(parts[0], ".")
 			suffix := strings.TrimPrefix(parts[1], ".")
-			
+
 			if prefix != "" && !strings.HasPrefix(path, prefix) {
 				return false
 			}
@@ -432,7 +432,7 @@ func (p *V2Parser) matchesGlob(path, pattern string) bool {
 			return true
 		}
 	}
-	
+
 	// Use standard filepath.Match for other patterns
 	matched, _ := filepath.Match(pattern, path)
 	return matched
