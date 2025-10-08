@@ -654,6 +654,75 @@ dm.LogWithExpression("(api.v1.auth.login|api.v2.auth.login)&db.query", "message"
 - Configuration-driven logic
 - Need for NOT operations or grouping
 
+## Slog Integration
+
+The debug library integrates seamlessly with Go's standard `log/slog` package, providing structured logging capabilities while maintaining all debug flag functionality.
+
+### Enabling Slog Integration
+
+```go
+// Enable slog with default text handler
+dm.EnableSlog()
+
+// Enable slog with custom handler
+dm.EnableSlogWithHandler(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+// Set custom slog logger
+dm.SetSlogLogger(customLogger)
+
+// Disable slog and return to traditional logging
+dm.DisableSlog()
+```
+
+### Output Formats
+
+**Traditional Logging:**
+```
+DEBUG [api.v1.auth.login]: User login attempt
+ERROR [db.query] db-service: Database connection failed
+```
+
+**Slog Text Format:**
+```
+time=2025-10-08T18:45:16.125+02:00 level=DEBUG msg="User login attempt" flag=api.v1.auth.login severity=DEBUG
+time=2025-10-08T18:45:16.126+02:00 level=ERROR msg="Database connection failed" flag=db.query severity=ERROR context=db-service
+```
+
+**Slog JSON Format:**
+```json
+{"time":"2025-10-08T18:45:16.125+02:00","level":"DEBUG","msg":"User login attempt","flag":"api.v1.auth.login","severity":"DEBUG"}
+{"time":"2025-10-08T18:45:16.126+02:00","level":"ERROR","msg":"Database connection failed","flag":"db.query","severity":"ERROR","context":"db-service"}
+```
+
+### Benefits of Slog Integration
+
+- **Structured Logging**: Automatic JSON/text formatting with timestamps
+- **Log Aggregation**: Compatible with log aggregation systems (ELK, Fluentd, etc.)
+- **Performance**: Efficient structured logging with minimal overhead
+- **Flexibility**: Use any slog handler (JSON, text, custom)
+- **Backward Compatibility**: Traditional logging still available
+
+### Slog Methods
+
+```go
+// Check if slog is enabled
+if dm.IsSlogEnabled() {
+    // Slog integration is active
+}
+
+// Enable with default settings
+dm.EnableSlog()
+
+// Enable with custom handler
+dm.EnableSlogWithHandler(slog.NewJSONHandler(os.Stdout, nil))
+
+// Set custom logger
+dm.SetSlogLogger(slog.Default())
+
+// Disable slog
+dm.DisableSlog()
+```
+
 ## Examples
 
 See the `example/` directory for complete working examples demonstrating various usage patterns.

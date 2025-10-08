@@ -1,6 +1,8 @@
 package debug
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -1641,5 +1643,55 @@ func TestV2LogicalExpressions(t *testing.T) {
 		if strings.Contains(output, msg) {
 			t.Errorf("Expected message '%s' to not be logged", msg)
 		}
+	}
+}
+
+func TestSlogIntegration(t *testing.T) {
+	dm := NewDebugManager()
+	dm.RegisterFlags([]FlagDefinition{
+		{TestFlag1, "api.v1.auth.login", "api.v1.auth.login"},
+		{TestFlag2, "db.query", "db.query"},
+	})
+
+	// Enable some flags
+	dm.SetFlags("api.v1.auth.login,db.query")
+
+	// Test traditional logging (default)
+	oldStderr := os.Stderr
+	r1, w1, _ := os.Pipe()
+	os.Stderr = w1
+
+	dm.Log(TestFlag1, "Traditional message")
+	w1.Close()
+	os.Stderr = oldStderr
+
+	buf1 := make([]byte, 1024)
+	n1, _ := r1.Read(buf1)
+	output1 := string(buf1[:n1])
+
+	if !strings.Contains(output1, "Traditional message") {
+		t.Errorf("Expected traditional message to be logged")
+	}
+
+	// Test slog integration with buffer
+	var buf2 bytes.Buffer
+	dm.EnableSlogWithHandler(slog.NewTextHandler(&buf2, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	dm.Log(TestFlag1, "Slog message")
+	output2 := buf2.String()
+
+	if !strings.Contains(output2, "Slog message") {
+		t.Errorf("Expected slog message to be logged, got: %s", output2)
+	}
+
+	// Test slog state
+	if !dm.IsSlogEnabled() {
+		t.Errorf("Expected slog to be enabled")
+	}
+
+	// Test disabling slog
+	dm.DisableSlog()
+	if dm.IsSlogEnabled() {
+		t.Errorf("Expected slog to be disabled")
 	}
 }

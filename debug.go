@@ -2,6 +2,7 @@ package debug
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,6 +90,8 @@ type DebugManager struct {
 	flagMap             map[string]DebugFlag
 	pathMap             map[DebugFlag]string
 	allFlags            []DebugFlag
+	logger               *slog.Logger
+	useSlog              bool
 }
 
 // NewDebugManager creates a new debug manager
@@ -102,6 +105,8 @@ func NewDebugManager() *DebugManager {
 		flagMap:             make(map[string]DebugFlag),
 		pathMap:             make(map[DebugFlag]string),
 		allFlags:            []DebugFlag{},
+		logger:              slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		useSlog:             false, // Default to traditional logging
 	}
 }
 
@@ -358,10 +363,24 @@ func (dm *DebugManager) LogWithSeverity(flag DebugFlag, severity Severity, conte
 		message := fmt.Sprintf(format, args...)
 		path := dm.pathMap[flag]
 
-		if context != "" {
-			fmt.Fprintf(os.Stderr, "%s [%s] %s: %s\n", severity.String(), path, context, message)
+		if dm.useSlog {
+			// Use structured logging with slog
+			attrs := []slog.Attr{
+				slog.String("flag", path),
+				slog.String("severity", severity.String()),
+			}
+			if context != "" {
+				attrs = append(attrs, slog.String("context", context))
+			}
+
+			dm.logger.LogAttrs(nil, dm.severityToSlogLevel(severity), message, attrs...)
 		} else {
-			fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), path, message)
+			// Use traditional logging
+			if context != "" {
+				fmt.Fprintf(os.Stderr, "%s [%s] %s: %s\n", severity.String(), path, context, message)
+			} else {
+				fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), path, message)
+			}
 		}
 	}
 }
@@ -1046,4 +1065,54 @@ func (dm *DebugManager) isFlagEnabled(flagPattern string) bool {
 	}
 
 	return false
+}
+
+// Slog Integration Methods
+
+// SetSlogLogger sets a custom slog.Logger for the debug manager
+func (dm *DebugManager) SetSlogLogger(logger *slog.Logger) {
+	dm.logger = logger
+	dm.useSlog = true
+}
+
+// EnableSlog enables slog integration with default settings
+func (dm *DebugManager) EnableSlog() {
+	dm.logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	dm.useSlog = true
+}
+
+// EnableSlogWithHandler enables slog integration with a custom handler
+func (dm *DebugManager) EnableSlogWithHandler(handler slog.Handler) {
+	dm.logger = slog.New(handler)
+	dm.useSlog = true
+}
+
+// DisableSlog disables slog integration and returns to traditional logging
+func (dm *DebugManager) DisableSlog() {
+	dm.useSlog = false
+}
+
+// IsSlogEnabled returns whether slog integration is enabled
+func (dm *DebugManager) IsSlogEnabled() bool {
+	return dm.useSlog
+}
+
+// severityToSlogLevel converts our Severity to slog.Level
+func (dm *DebugManager) severityToSlogLevel(severity Severity) slog.Level {
+	switch severity {
+	case SeverityTrace:
+		return slog.LevelDebug - 1 // Custom level below debug
+	case SeverityDebug:
+		return slog.LevelDebug
+	case SeverityInfo:
+		return slog.LevelInfo
+	case SeverityWarning:
+		return slog.LevelWarn
+	case SeverityError:
+		return slog.LevelError
+	case SeverityFatal:
+		return slog.LevelError + 1 // Custom level above error
+	default:
+		return slog.LevelDebug
+	}
 }

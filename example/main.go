@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
 
 	"github.com/SCKelemen/debug"
 )
@@ -393,4 +395,29 @@ func main() {
 	// Operator precedence
 	dm.LogWithExpression("api.v1.auth.login|db.query&http.request", "V2: Operator precedence (AND before OR)")
 	dm.LogWithExpression("(api.v1.auth.login|db.query)&http.request", "V2: Explicit parentheses override precedence")
+
+	fmt.Println("\n=== Example 13: Slog Integration ===")
+	dm.SetFlags("api.v1.auth.login,db.query")
+	
+	// Traditional logging (default)
+	fmt.Println("Traditional logging:")
+	dm.Log(DebugAPIV1AuthLogin, "Traditional debug message")
+	dm.LogWithSeverity(DebugDBQuery, debug.SeverityError, "db-service", "Traditional error message")
+	
+	// Enable slog integration
+	fmt.Println("\nSlog integration:")
+	dm.EnableSlog()
+	dm.Log(DebugAPIV1AuthLogin, "Slog debug message")
+	dm.LogWithSeverity(DebugDBQuery, debug.SeverityError, "db-service", "Slog error message")
+	
+	// Custom slog handler (JSON output)
+	fmt.Println("\nSlog with JSON handler:")
+	dm.EnableSlogWithHandler(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	dm.Log(DebugAPIV1AuthLogin, "JSON slog message")
+	dm.LogWithSeverity(DebugDBQuery, debug.SeverityInfo, "db-service", "JSON slog info message")
+	
+	// Disable slog and return to traditional
+	dm.DisableSlog()
+	fmt.Println("\nBack to traditional logging:")
+	dm.Log(DebugAPIV1AuthLogin, "Back to traditional")
 }
