@@ -190,7 +190,7 @@ func main() {
 
 	// Example 9: Deep hierarchical nesting
 	fmt.Println("\n=== Example 9: Deep hierarchical nesting ===")
-	
+
 	// Define deeply nested API flags
 	const (
 		// API section
@@ -211,10 +211,10 @@ func main() {
 		DebugAPIV2End
 		debugAPIEnd
 	)
-	
+
 	// Create a new debug manager for the API example
 	apiDM := debug.NewDebugManager()
-	
+
 	// Register the deeply nested flags
 	apiFlagDefinitions := []debug.FlagDefinition{
 		{Flag: DebugAPIV1Start, Name: "api.v1.start", Path: "api.v1.start"},
@@ -230,47 +230,47 @@ func main() {
 		{Flag: DebugAPIV2AuthRenewLease, Name: "api.v2.auth.renewLease", Path: "api.v2.auth.renewLease"},
 		{Flag: DebugAPIV2End, Name: "api.v2.end", Path: "api.v2.end"},
 	}
-	
+
 	apiDM.RegisterFlags(apiFlagDefinitions)
-	
+
 	// Demonstrate different glob patterns
 	fmt.Println("Testing deep hierarchical glob patterns:")
-	
+
 	// Test 1: Enable all API v1 auth operations
 	fmt.Println("\n1. Enable all API v1 auth operations (api.v1.auth.*)")
 	err = apiDM.SetFlags("api.v1.auth.*")
 	if err != nil {
 		log.Fatal(err)
 	}
-	
+
 	apiDM.Log(DebugAPIV1AuthLogin, "User login attempt")
 	apiDM.Log(DebugAPIV1AuthLogout, "User logout")
 	apiDM.Log(DebugAPIV1AuthRenewLease, "Token renewal")
 	apiDM.Log(DebugAPIV2AuthLogin, "This should not appear") // Different version
-	
+
 	// Test 2: Enable all API v2 operations with severity filtering
 	fmt.Println("\n2. Enable all API v2 operations with ERROR+ severity (api.v2.*:+ERROR)")
 	err = apiDM.SetFlags("api.v2.*:+ERROR")
 	if err != nil {
 		log.Fatal(err)
 	}
-	
+
 	apiDM.LogWithSeverity(DebugAPIV2AuthLogin, debug.SeverityInfo, "", "V2 login info")     // Won't show
 	apiDM.LogWithSeverity(DebugAPIV2AuthLogin, debug.SeverityError, "", "V2 login error")   // Will show
 	apiDM.LogWithSeverity(DebugAPIV2AuthLogout, debug.SeverityFatal, "", "V2 logout fatal") // Will show
-	
+
 	// Test 3: Enable all auth operations across all versions
 	fmt.Println("\n3. Enable all auth operations across versions (api.**.auth.*)")
 	err = apiDM.SetFlags("api.**.auth.*")
 	if err != nil {
 		log.Fatal(err)
 	}
-	
+
 	apiDM.Log(DebugAPIV1AuthLogin, "V1 login")
 	apiDM.Log(DebugAPIV1AuthLogout, "V1 logout")
 	apiDM.Log(DebugAPIV2AuthLogin, "V2 login")
 	apiDM.Log(DebugAPIV2AuthLogout, "V2 logout")
-	
+
 	// Test 4: Complex mixed configuration
 	fmt.Println("\n4. Complex mixed configuration:")
 	fmt.Println("   - V1 auth: only ERROR messages")
@@ -280,10 +280,117 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	
-	apiDM.LogWithSeverity(DebugAPIV1AuthLogin, debug.SeverityInfo, "", "V1 login info")     // Won't show
-	apiDM.LogWithSeverity(DebugAPIV1AuthLogin, debug.SeverityError, "", "V1 login error")   // Will show
-	apiDM.LogWithSeverity(DebugAPIV2AuthLogin, debug.SeverityInfo, "", "V2 login info")     // Won't show
+
+	apiDM.LogWithSeverity(DebugAPIV1AuthLogin, debug.SeverityInfo, "", "V1 login info")       // Won't show
+	apiDM.LogWithSeverity(DebugAPIV1AuthLogin, debug.SeverityError, "", "V1 login error")     // Will show
+	apiDM.LogWithSeverity(DebugAPIV2AuthLogin, debug.SeverityInfo, "", "V2 login info")       // Won't show
 	apiDM.LogWithSeverity(DebugAPIV2AuthLogin, debug.SeverityWarning, "", "V2 login warning") // Will show
-	apiDM.LogWithSeverity(DebugAPIV1Start, debug.SeverityInfo, "", "V1 start info")         // Will show (matches api.*:+INFO)
+	apiDM.LogWithSeverity(DebugAPIV1Start, debug.SeverityInfo, "", "V1 start info")           // Will show (matches api.*:+INFO)
+
+	// Example 10: Multi-flag logging
+	fmt.Println("\n=== Example 10: Multi-flag logging ===")
+	fmt.Println("Testing multi-flag logging for granular control:")
+	fmt.Println("- Only DB queries within auth login flow")
+	fmt.Println("- Only HTTP requests within auth login flow")
+
+	// Create a new debug manager for multi-flag logging
+	multiDM := debug.NewDebugManager()
+	multiDM.RegisterFlags([]debug.FlagDefinition{
+		{DebugAPIV1AuthLogin, "api.v1.auth.login", "api.v1.auth.login"},
+		{DebugDBQuery, "db.query", "db.query"},
+		{DebugHTTPRequest, "http.request", "http.request"},
+		{DebugValidation, "validation", "validation"},
+	})
+
+	// Enable specific flags for multi-flag logging
+	err = multiDM.SetFlags("api.v1.auth.login,db.query,http.request")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Multi-flag logging: only DB queries within auth login
+	multiDM.LogWithFlags(DebugAPIV1AuthLogin|DebugDBQuery, "DB query in auth login: %s", "SELECT * FROM users WHERE id = ?")
+
+	// Multi-flag logging: only HTTP requests within auth login
+	multiDM.LogWithFlags(DebugAPIV1AuthLogin|DebugHTTPRequest, "HTTP request in auth login: %s", "POST /api/v1/auth/login")
+
+	// This won't log because validation is not enabled
+	multiDM.LogWithFlags(DebugAPIV1AuthLogin|DebugValidation, "Validation in auth login: %s", "validate user credentials")
+
+	// Multi-flag logging with severity
+	multiDM.LogWithFlagsAndSeverity(DebugAPIV1AuthLogin|DebugDBQuery, debug.SeverityError, "", "Critical DB error in auth login: %s", "connection timeout")
+
+	// Multi-flag logging with context
+	multiDM.LogWithFlagsAndContext(DebugAPIV1AuthLogin|DebugHTTPRequest, "auth-service", "HTTP request in auth login: %s", "POST /api/v1/auth/login")
+
+	fmt.Println("\n=== Example 11: Any vs All flag logic ===")
+	fmt.Println("Testing explicit any() and all() flag logic:")
+
+	// Create a new debug manager for any/all testing
+	anyAllDM := debug.NewDebugManager()
+	anyAllDM.RegisterFlags([]debug.FlagDefinition{
+		{DebugAPIV1AuthLogin, "api.v1.auth.login", "api.v1.auth.login"},
+		{DebugDBQuery, "db.query", "db.query"},
+		{DebugHTTPRequest, "http.request", "http.request"},
+	})
+
+	// Enable only some flags
+	err = anyAllDM.SetFlags("api.v1.auth.login,db.query")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Enabled flags: api.v1.auth.login, db.query")
+	fmt.Println("Testing with flags: api.v1.auth.login | db.query | http.request")
+
+	// Test ANY logic - should log because some flags are enabled
+	anyAllDM.LogWithAnyFlags(DebugAPIV1AuthLogin|DebugDBQuery|DebugHTTPRequest, "ANY: This logs because some flags are enabled")
+
+	// Test ALL logic - should NOT log because not all flags are enabled
+	anyAllDM.LogWithAllFlags(DebugAPIV1AuthLogin|DebugDBQuery|DebugHTTPRequest, "ALL: This should NOT log because not all flags are enabled")
+
+	// Test ALL logic with only enabled flags - should log
+	anyAllDM.LogWithAllFlags(DebugAPIV1AuthLogin|DebugDBQuery, "ALL: This logs because all specified flags are enabled")
+
+	// Test ANY vs ALL with severity
+	anyAllDM.SetFlags("api.v1.auth.login:ERROR,db.query:WARN")
+
+	// ANY with ERROR - should log (matches api.v1.auth.login:ERROR)
+	anyAllDM.LogWithAnyFlagsAndSeverity(DebugAPIV1AuthLogin|DebugDBQuery, debug.SeverityError, "", "ANY ERROR: Logs because api.v1.auth.login allows ERROR")
+
+	// ALL with ERROR - should log (both flags enabled, api.v1.auth.login allows ERROR)
+	anyAllDM.LogWithAllFlagsAndSeverity(DebugAPIV1AuthLogin|DebugDBQuery, debug.SeverityError, "", "ALL ERROR: Logs because both flags enabled and api.v1.auth.login allows ERROR")
+
+	// ANY with INFO - should not log (neither flag allows INFO)
+	anyAllDM.LogWithAnyFlagsAndSeverity(DebugAPIV1AuthLogin|DebugDBQuery, debug.SeverityInfo, "", "ANY INFO: Should not log")
+
+	// ALL with INFO - should not log (neither flag allows INFO)
+	anyAllDM.LogWithAllFlagsAndSeverity(DebugAPIV1AuthLogin|DebugDBQuery, debug.SeverityInfo, "", "ALL INFO: Should not log")
+
+	fmt.Println("\n=== Example 12: V2 Logical Expressions ===")
+	dm.SetFlags("api.v1.auth.login,db.query,http.request")
+
+	// Simple expressions
+	dm.LogWithExpression("api.v1.auth.login", "V2: Simple flag expression")
+	dm.LogWithExpression("validation", "V2: Disabled flag (should not log)")
+
+	// OR expressions
+	dm.LogWithExpression("api.v1.auth.login|validation", "V2: OR expression (one enabled)")
+	dm.LogWithExpression("validation|http.request", "V2: OR expression (one enabled)")
+
+	// AND expressions
+	dm.LogWithExpression("api.v1.auth.login&db.query", "V2: AND expression (both enabled)")
+	dm.LogWithExpression("api.v1.auth.login&validation", "V2: AND expression (one disabled)")
+
+	// NOT expressions
+	dm.LogWithExpression("!validation", "V2: NOT expression (disabled flag)")
+	dm.LogWithExpression("!api.v1.auth.login", "V2: NOT expression (enabled flag)")
+
+	// Complex expressions with parentheses
+	dm.LogWithExpression("(api.v1.auth.login|validation)&db.query", "V2: Complex expression with parentheses")
+	dm.LogWithExpression("(http.request|validation)&api.v1.auth.login", "V2: Complex expression with parentheses")
+
+	// Operator precedence
+	dm.LogWithExpression("api.v1.auth.login|db.query&http.request", "V2: Operator precedence (AND before OR)")
+	dm.LogWithExpression("(api.v1.auth.login|db.query)&http.request", "V2: Explicit parentheses override precedence")
 }

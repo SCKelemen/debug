@@ -334,6 +334,14 @@ func (dm *DebugManager) IsEnabled(flag DebugFlag) bool {
 	return dm.flags&flag != 0
 }
 
+// IsEnabledByName checks if a flag is enabled by name
+func (dm *DebugManager) IsEnabledByName(name string) bool {
+	if flag, exists := dm.flagMap[name]; exists {
+		return dm.IsEnabled(flag)
+	}
+	return false
+}
+
 // Log writes a debug message if the flag is enabled
 func (dm *DebugManager) Log(flag DebugFlag, format string, args ...interface{}) {
 	dm.LogWithSeverity(flag, SeverityDebug, "", format, args...)
@@ -358,6 +366,110 @@ func (dm *DebugManager) LogWithSeverity(flag DebugFlag, severity Severity, conte
 	}
 }
 
+// LogWithFlags logs a message if any of the specified flags are enabled
+// This allows for more granular control by combining multiple flags
+// Example: LogWithFlags(DebugAPIV1AuthLogin|DebugDBQuery, "DB query: %s", query)
+func (dm *DebugManager) LogWithFlags(flags DebugFlag, format string, args ...interface{}) {
+	dm.LogWithFlagsAndSeverity(flags, SeverityDebug, "", format, args...)
+}
+
+// LogWithAnyFlags logs a message if ANY of the specified flags are enabled
+// Example: LogWithAnyFlags(DebugAPIV1AuthLogin|DebugHTTPRequest, "Operation in auth login: %s", data)
+func (dm *DebugManager) LogWithAnyFlags(flags DebugFlag, format string, args ...interface{}) {
+	dm.LogWithAnyFlagsAndSeverity(flags, SeverityDebug, "", format, args...)
+}
+
+// LogWithAllFlags logs a message if ALL of the specified flags are enabled
+// Example: LogWithAllFlags(DebugAPIV1AuthLogin|DebugDBQuery, "DB query in auth login: %s", query)
+func (dm *DebugManager) LogWithAllFlags(flags DebugFlag, format string, args ...interface{}) {
+	dm.LogWithAllFlagsAndSeverity(flags, SeverityDebug, "", format, args...)
+}
+
+// LogWithFlagsAndContext logs a message with context if any of the specified flags are enabled
+func (dm *DebugManager) LogWithFlagsAndContext(flags DebugFlag, context string, format string, args ...interface{}) {
+	dm.LogWithFlagsAndSeverity(flags, SeverityDebug, context, format, args...)
+}
+
+// LogWithFlagsAndSeverity logs a message with severity if any of the specified flags are enabled
+func (dm *DebugManager) LogWithFlagsAndSeverity(flags DebugFlag, severity Severity, context string, format string, args ...interface{}) {
+	if dm.shouldLogWithFlags(flags, severity) {
+		message := fmt.Sprintf(format, args...)
+		path := dm.getCombinedPath(flags)
+
+		if context != "" {
+			fmt.Fprintf(os.Stderr, "%s [%s] %s: %s\n", severity.String(), path, context, message)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), path, message)
+		}
+	}
+}
+
+// LogWithAnyFlagsAndContext logs a message with context if ANY of the specified flags are enabled
+func (dm *DebugManager) LogWithAnyFlagsAndContext(flags DebugFlag, context string, format string, args ...interface{}) {
+	dm.LogWithAnyFlagsAndSeverity(flags, SeverityDebug, context, format, args...)
+}
+
+// LogWithAnyFlagsAndSeverity logs a message with severity if ANY of the specified flags are enabled
+func (dm *DebugManager) LogWithAnyFlagsAndSeverity(flags DebugFlag, severity Severity, context string, format string, args ...interface{}) {
+	if dm.shouldLogWithAnyFlags(flags, severity) {
+		message := fmt.Sprintf(format, args...)
+		path := dm.getCombinedPath(flags)
+
+		if context != "" {
+			fmt.Fprintf(os.Stderr, "%s [%s] %s: %s\n", severity.String(), path, context, message)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), path, message)
+		}
+	}
+}
+
+// LogWithAllFlagsAndContext logs a message with context if ALL of the specified flags are enabled
+func (dm *DebugManager) LogWithAllFlagsAndContext(flags DebugFlag, context string, format string, args ...interface{}) {
+	dm.LogWithAllFlagsAndSeverity(flags, SeverityDebug, context, format, args...)
+}
+
+// LogWithAllFlagsAndSeverity logs a message with severity if ALL of the specified flags are enabled
+func (dm *DebugManager) LogWithAllFlagsAndSeverity(flags DebugFlag, severity Severity, context string, format string, args ...interface{}) {
+	if dm.shouldLogWithAllFlags(flags, severity) {
+		message := fmt.Sprintf(format, args...)
+		path := dm.getCombinedPath(flags)
+
+		if context != "" {
+			fmt.Fprintf(os.Stderr, "%s [%s] %s: %s\n", severity.String(), path, context, message)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), path, message)
+		}
+	}
+}
+
+// V2 Logical Expression Methods
+
+// LogWithExpression logs a message if the logical expression evaluates to true
+// V2 feature: supports logical operators (|, &, !, parentheses)
+// Example: LogWithExpression("api.v1.auth.login|db.query&http.request", "message")
+func (dm *DebugManager) LogWithExpression(expression string, format string, args ...interface{}) {
+	dm.LogWithExpressionAndSeverity(expression, SeverityDebug, "", format, args...)
+}
+
+// LogWithExpressionAndSeverity logs a message with severity if the logical expression evaluates to true
+func (dm *DebugManager) LogWithExpressionAndSeverity(expression string, severity Severity, context string, format string, args ...interface{}) {
+	if dm.shouldLogWithExpression(expression, severity) {
+		message := fmt.Sprintf(format, args...)
+		path := expression // Use the expression as the path for V2
+
+		if context != "" {
+			fmt.Fprintf(os.Stderr, "%s [%s] %s: %s\n", severity.String(), path, context, message)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), path, message)
+		}
+	}
+}
+
+// LogWithExpressionAndContext logs a message with context if the logical expression evaluates to true
+func (dm *DebugManager) LogWithExpressionAndContext(expression string, context string, format string, args ...interface{}) {
+	dm.LogWithExpressionAndSeverity(expression, SeverityDebug, context, format, args...)
+}
+
 // LogWithPath writes a debug message with a specific path
 func (dm *DebugManager) LogWithPath(path string, severity Severity, context string, format string, args ...interface{}) {
 	if dm.shouldLogPath(path, severity) {
@@ -380,10 +492,14 @@ func (dm *DebugManager) shouldLog(flag DebugFlag, severity Severity) bool {
 
 	path := dm.pathMap[flag]
 
-	// Check path-specific severity filters first
+	// Check if there's a path-specific severity filter for this path
+	if dm.shouldLogWithPathSeverity(path, severity) {
+		return true
+	}
+
+	// If there are path-specific filters but none match this path, don't log
 	if len(dm.pathSeverityFilters) > 0 {
-		// If there are path-specific filters, only use them
-		return dm.shouldLogWithPathSeverity(path, severity)
+		return false
 	}
 
 	// Fall back to global severity filter
@@ -397,6 +513,187 @@ func (dm *DebugManager) shouldLog(flag DebugFlag, severity Severity) bool {
 	}
 
 	return true
+}
+
+// shouldLogWithFlags determines if a message should be logged based on multiple flags and severity
+// Returns true if ANY of the specified flags are enabled and pass severity filtering
+func (dm *DebugManager) shouldLogWithFlags(flags DebugFlag, severity Severity) bool {
+	// Check if any of the flags are enabled
+	if (dm.flags & flags) == 0 {
+		return false
+	}
+
+	// For multi-flag logging, we need to check if at least one flag passes all filters
+	// We'll use the first enabled flag's path for severity filtering
+	for flag := DebugFlag(1); flag <= flags; flag <<= 1 {
+		if (flags&flag) != 0 && (dm.flags&flag) != 0 {
+			path := dm.pathMap[flag]
+
+			// Check if there's a path-specific severity filter for this path
+			if dm.shouldLogWithPathSeverity(path, severity) {
+				return true
+			}
+
+			// If there are path-specific filters but none match this path, continue checking other flags
+			if len(dm.pathSeverityFilters) > 0 {
+				continue
+			}
+
+			// Fall back to global severity filter
+			if severity >= dm.severityFilter {
+				// Check path filters if glob is enabled
+				if !dm.globEnabled || len(dm.pathFilters) == 0 || dm.matchesPathFilters(path) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// shouldLogWithAnyFlags determines if a message should be logged based on multiple flags and severity
+// Returns true if ANY of the specified flags are enabled and pass severity filtering
+func (dm *DebugManager) shouldLogWithAnyFlags(flags DebugFlag, severity Severity) bool {
+	// Check if any of the flags are enabled
+	if (dm.flags & flags) == 0 {
+		return false
+	}
+
+	// For multi-flag logging, we need to check if at least one flag passes all filters
+	// We'll use the first enabled flag's path for severity filtering
+	for flag := DebugFlag(1); flag <= flags; flag <<= 1 {
+		if (flags&flag) != 0 && (dm.flags&flag) != 0 {
+			path := dm.pathMap[flag]
+
+			// Check if there's a path-specific severity filter for this path
+			if dm.shouldLogWithPathSeverity(path, severity) {
+				return true
+			}
+
+			// If there are path-specific filters but none match this path, continue checking other flags
+			if len(dm.pathSeverityFilters) > 0 {
+				continue
+			}
+
+			// Fall back to global severity filter
+			if severity >= dm.severityFilter {
+				// Check path filters if glob is enabled
+				if !dm.globEnabled || len(dm.pathFilters) == 0 || dm.matchesPathFilters(path) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// shouldLogWithAllFlags determines if a message should be logged based on multiple flags and severity
+// Returns true if ALL of the specified flags are enabled and pass severity filtering
+func (dm *DebugManager) shouldLogWithAllFlags(flags DebugFlag, severity Severity) bool {
+	// Check if ALL of the flags are enabled
+	if (dm.flags & flags) != flags {
+		return false
+	}
+
+	// For ALL flag logging, we need to check if all flags pass their respective filters
+	// We'll use the first flag's path for severity filtering (they should all be similar)
+	for flag := DebugFlag(1); flag <= flags; flag <<= 1 {
+		if (flags & flag) != 0 {
+			path := dm.pathMap[flag]
+
+			// Check if there's a path-specific severity filter for this path
+			if dm.shouldLogWithPathSeverity(path, severity) {
+				return true
+			}
+
+			// If there are path-specific filters but none match this path, continue checking other flags
+			if len(dm.pathSeverityFilters) > 0 {
+				continue
+			}
+
+			// Fall back to global severity filter
+			if severity >= dm.severityFilter {
+				// Check path filters if glob is enabled
+				if !dm.globEnabled || len(dm.pathFilters) == 0 || dm.matchesPathFilters(path) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// shouldLogWithExpression determines if a message should be logged based on a logical expression
+func (dm *DebugManager) shouldLogWithExpression(expression string, severity Severity) bool {
+	// Parse the logical expression
+	node, err := dm.parseLogicalExpression(expression)
+	if err != nil {
+		// If parsing fails, don't log
+		return false
+	}
+
+	// Evaluate the expression
+	result, err := dm.evaluateExpression(node)
+	if err != nil {
+		// If evaluation fails, don't log
+		return false
+	}
+
+	// If expression evaluates to false, don't log
+	if !result {
+		return false
+	}
+
+	// Apply severity filtering
+	// For V2 expressions, we use global severity filtering for simplicity
+	// In a full implementation, we might want more sophisticated severity handling
+	if severity < dm.severityFilter {
+		return false
+	}
+
+	return true
+}
+
+// getFirstFlagFromExpression extracts the first flag from an expression node
+func (dm *DebugManager) getFirstFlagFromExpression(node *ExpressionNode) string {
+	if node.Type == NodeFlag {
+		return node.Value
+	}
+
+	for _, child := range node.Children {
+		if flag := dm.getFirstFlagFromExpression(child); flag != "" {
+			return flag
+		}
+	}
+
+	return ""
+}
+
+// getCombinedPath creates a combined path string for multiple flags
+func (dm *DebugManager) getCombinedPath(flags DebugFlag) string {
+	var paths []string
+
+	for flag := DebugFlag(1); flag <= flags; flag <<= 1 {
+		if (flags&flag) != 0 && (dm.flags&flag) != 0 {
+			if path, exists := dm.pathMap[flag]; exists {
+				paths = append(paths, path)
+			}
+		}
+	}
+
+	if len(paths) == 0 {
+		return "unknown"
+	}
+
+	if len(paths) == 1 {
+		return paths[0]
+	}
+
+	// For multiple paths, combine them with "|"
+	return strings.Join(paths, "|")
 }
 
 // shouldLogPath determines if a message should be logged based on path and severity
@@ -517,4 +814,236 @@ func (dm *DebugManager) GetFlagName(flag DebugFlag) string {
 		}
 	}
 	return "unknown"
+}
+
+// ExpressionNode represents a node in the logical expression tree
+type ExpressionNode struct {
+	Type     NodeType
+	Value    string
+	Children []*ExpressionNode
+}
+
+type NodeType int
+
+const (
+	NodeFlag NodeType = iota
+	NodeAnd
+	NodeOr
+	NodeNot
+	NodeGroup
+)
+
+// parseLogicalExpression parses a logical expression string into an AST
+func (dm *DebugManager) parseLogicalExpression(expr string) (*ExpressionNode, error) {
+	// Remove whitespace
+	expr = strings.ReplaceAll(expr, " ", "")
+	if expr == "" {
+		return nil, fmt.Errorf("empty expression")
+	}
+
+	// Check if this is a simple V1 expression (no logical operators)
+	if !strings.ContainsAny(expr, "&|!()") {
+		return dm.parseV1Expression(expr)
+	}
+
+	// Parse V2 logical expression
+	return dm.parseV2Expression(expr)
+}
+
+// parseV1Expression parses a simple V1 expression (comma-separated flags)
+func (dm *DebugManager) parseV1Expression(expr string) (*ExpressionNode, error) {
+	flags := strings.Split(expr, ",")
+	if len(flags) == 1 {
+		// Single flag
+		return &ExpressionNode{Type: NodeFlag, Value: strings.TrimSpace(flags[0])}, nil
+	}
+
+	// Multiple flags - create OR expression
+	children := make([]*ExpressionNode, len(flags))
+	for i, flag := range flags {
+		children[i] = &ExpressionNode{Type: NodeFlag, Value: strings.TrimSpace(flag)}
+	}
+	return &ExpressionNode{Type: NodeOr, Children: children}, nil
+}
+
+// parseV2Expression parses a V2 logical expression with operators
+func (dm *DebugManager) parseV2Expression(expr string) (*ExpressionNode, error) {
+	// Simple recursive descent parser
+	return dm.parseOrExpression(expr)
+}
+
+// parseOrExpression parses OR expressions (lowest precedence)
+func (dm *DebugManager) parseOrExpression(expr string) (*ExpressionNode, error) {
+	// Look for OR operators from left to right
+	orPos := dm.findOperatorLeftToRight(expr, "|")
+	if orPos == -1 {
+		// No OR operator found, parse as AND expression
+		return dm.parseAndExpression(expr)
+	}
+
+	left, err := dm.parseAndExpression(expr[:orPos])
+	if err != nil {
+		return nil, err
+	}
+
+	right, err := dm.parseOrExpression(expr[orPos+1:])
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExpressionNode{
+		Type:     NodeOr,
+		Children: []*ExpressionNode{left, right},
+	}, nil
+}
+
+// parseAndExpression parses AND expressions (medium precedence)
+func (dm *DebugManager) parseAndExpression(expr string) (*ExpressionNode, error) {
+	// Look for AND operators from left to right
+	andPos := dm.findOperatorLeftToRight(expr, "&")
+	if andPos == -1 {
+		// No AND operator found, parse as NOT expression
+		return dm.parseNotExpression(expr)
+	}
+
+	left, err := dm.parseNotExpression(expr[:andPos])
+	if err != nil {
+		return nil, err
+	}
+
+	right, err := dm.parseAndExpression(expr[andPos+1:])
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExpressionNode{
+		Type:     NodeAnd,
+		Children: []*ExpressionNode{left, right},
+	}, nil
+}
+
+// parseNotExpression parses NOT expressions (highest precedence)
+func (dm *DebugManager) parseNotExpression(expr string) (*ExpressionNode, error) {
+	if strings.HasPrefix(expr, "!") {
+		operand, err := dm.parsePrimaryExpression(expr[1:])
+		if err != nil {
+			return nil, err
+		}
+		return &ExpressionNode{
+			Type:     NodeNot,
+			Children: []*ExpressionNode{operand},
+		}, nil
+	}
+
+	return dm.parsePrimaryExpression(expr)
+}
+
+// parsePrimaryExpression parses primary expressions (flags and groups)
+func (dm *DebugManager) parsePrimaryExpression(expr string) (*ExpressionNode, error) {
+	if strings.HasPrefix(expr, "(") && strings.HasSuffix(expr, ")") {
+		// Group expression
+		inner := expr[1 : len(expr)-1]
+		return dm.parseOrExpression(inner)
+	}
+
+	// Single flag
+	return &ExpressionNode{Type: NodeFlag, Value: expr}, nil
+}
+
+// findOperator finds the position of an operator, respecting parentheses
+func (dm *DebugManager) findOperator(expr, op string) int {
+	parenCount := 0
+	for i := len(expr) - 1; i >= 0; i-- {
+		if expr[i] == ')' {
+			parenCount++
+		} else if expr[i] == '(' {
+			parenCount--
+		} else if parenCount == 0 && strings.HasPrefix(expr[i:], op) {
+			return i
+		}
+	}
+	return -1
+}
+
+// findOperatorLeftToRight finds the position of an operator from left to right, respecting parentheses
+func (dm *DebugManager) findOperatorLeftToRight(expr, op string) int {
+	parenCount := 0
+	for i := 0; i < len(expr); i++ {
+		if expr[i] == '(' {
+			parenCount++
+		} else if expr[i] == ')' {
+			parenCount--
+		} else if parenCount == 0 && strings.HasPrefix(expr[i:], op) {
+			return i
+		}
+	}
+	return -1
+}
+
+// evaluateExpression evaluates a logical expression against enabled flags
+func (dm *DebugManager) evaluateExpression(node *ExpressionNode) (bool, error) {
+	switch node.Type {
+	case NodeFlag:
+		// Check if this flag is enabled
+		return dm.isFlagEnabled(node.Value), nil
+	case NodeAnd:
+		if len(node.Children) != 2 {
+			return false, fmt.Errorf("AND node must have exactly 2 children")
+		}
+		left, err := dm.evaluateExpression(node.Children[0])
+		if err != nil {
+			return false, err
+		}
+		right, err := dm.evaluateExpression(node.Children[1])
+		if err != nil {
+			return false, err
+		}
+		return left && right, nil
+	case NodeOr:
+		if len(node.Children) != 2 {
+			return false, fmt.Errorf("OR node must have exactly 2 children")
+		}
+		left, err := dm.evaluateExpression(node.Children[0])
+		if err != nil {
+			return false, err
+		}
+		right, err := dm.evaluateExpression(node.Children[1])
+		if err != nil {
+			return false, err
+		}
+		return left || right, nil
+	case NodeNot:
+		if len(node.Children) != 1 {
+			return false, fmt.Errorf("NOT node must have exactly 1 child")
+		}
+		result, err := dm.evaluateExpression(node.Children[0])
+		if err != nil {
+			return false, err
+		}
+		return !result, nil
+	case NodeGroup:
+		if len(node.Children) != 1 {
+			return false, fmt.Errorf("GROUP node must have exactly 1 child")
+		}
+		return dm.evaluateExpression(node.Children[0])
+	default:
+		return false, fmt.Errorf("unknown node type: %v", node.Type)
+	}
+}
+
+// isFlagEnabled checks if a flag pattern is enabled
+func (dm *DebugManager) isFlagEnabled(flagPattern string) bool {
+	// Check for exact match first
+	if dm.IsEnabledByName(flagPattern) {
+		return true
+	}
+
+	// Check for glob pattern match
+	for flag, path := range dm.pathMap {
+		if dm.IsEnabled(flag) && dm.matchesGlob(path, flagPattern) {
+			return true
+		}
+	}
+
+	return false
 }
