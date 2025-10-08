@@ -483,19 +483,304 @@ func TestEnableGlob(t *testing.T) {
 
 func TestSetPathFilters(t *testing.T) {
 	dm := NewDebugManager()
-
+	
 	filters := []string{"test.*", "other.*"}
 	dm.SetPathFilters(filters)
-
+	
 	if len(dm.pathFilters) != 2 {
 		t.Errorf("Expected 2 path filters, got %d", len(dm.pathFilters))
 	}
-
+	
 	if dm.pathFilters[0] != "test.*" {
 		t.Errorf("Expected first filter to be 'test.*', got '%s'", dm.pathFilters[0])
 	}
-
+	
 	if dm.pathFilters[1] != "other.*" {
 		t.Errorf("Expected second filter to be 'other.*', got '%s'", dm.pathFilters[1])
+	}
+}
+
+func TestParseFlagWithSeverity(t *testing.T) {
+	dm := NewDebugManager()
+	
+	testCases := []struct {
+		input     string
+		path      string
+		hasFilter bool
+		filterType SeverityFilterType
+		severities map[Severity]bool
+		minSeverity Severity
+		hasError  bool
+	}{
+		{"test.flag", "test.flag", false, 0, nil, 0, false},
+		{"test.flag:ERROR", "test.flag", true, SeverityFilterSpecific, map[Severity]bool{SeverityError: true}, 0, false},
+		{"test.flag:+WARN", "test.flag", true, SeverityFilterMin, nil, SeverityWarning, false},
+		{"test.flag:WARN+", "test.flag", true, SeverityFilterMin, nil, SeverityWarning, false},
+		{"test.flag:ERROR|INFO", "test.flag", true, SeverityFilterSpecific, map[Severity]bool{SeverityError: true, SeverityInfo: true}, 0, false},
+		{"test.flag:INVALID", "test.flag", true, 0, nil, 0, true},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.input, func(t *testing.T) {
+			path, filter, err := dm.parseFlagWithSeverity(tc.input)
+			
+			if tc.hasError {
+				if err == nil {
+					t.Errorf("Expected error for input %s", tc.input)
+				}
+				return
+			}
+			
+			if err != nil {
+				t.Errorf("Unexpected error for input %s: %v", tc.input, err)
+				return
+			}
+			
+			if path != tc.path {
+				t.Errorf("Expected path '%s', got '%s'", tc.path, path)
+			}
+			
+			if tc.hasFilter {
+				if filter == nil {
+					t.Errorf("Expected severity filter for input %s", tc.input)
+					return
+				}
+				
+				if filter.Type != tc.filterType {
+					t.Errorf("Expected filter type %v, got %v", tc.filterType, filter.Type)
+				}
+				
+				if tc.filterType == SeverityFilterSpecific {
+					if len(filter.Severities) != len(tc.severities) {
+						t.Errorf("Expected %d severities, got %d", len(tc.severities), len(filter.Severities))
+					}
+					for severity, expected := range tc.severities {
+						if filter.Severities[severity] != expected {
+							t.Errorf("Expected severity %v to be %v", severity, expected)
+						}
+					}
+				}
+				
+				if tc.filterType == SeverityFilterMin {
+					if filter.MinSeverity != tc.minSeverity {
+						t.Errorf("Expected min severity %v, got %v", tc.minSeverity, filter.MinSeverity)
+					}
+				}
+			} else {
+				if filter != nil {
+					t.Errorf("Expected no severity filter for input %s", tc.input)
+				}
+			}
+		})
+	}
+}
+
+func TestSetFlagsWithSeverityFiltering(t *testing.T) {
+	dm := NewDebugManager()
+	dm.RegisterFlags([]FlagDefinition{
+		{TestFlag1, "test1", "test.flag1"},
+		{TestFlag2, "test2", "test.flag2"},
+		{TestFlag3, "test3", "test.flag3"},
+	})
+	
+	// Test single flag with severity filter
+	err := dm.SetFlags("test1:ERROR")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	
+	if !dm.IsEnabled(TestFlag1) {
+		t.Error("Expected TestFlag1 to be enabled")
+	}
+	
+	if len(dm.pathSeverityFilters) != 1 {
+		t.Errorf("Expected 1 path severity filter, got %d", len(dm.pathSeverityFilters))
+	}
+	
+	filter := dm.pathSeverityFilters[0]
+	if filter.Pattern != "test.flag1" {
+		t.Errorf("Expected pattern 'test.flag1', got '%s'", filter.Pattern)
+	}
+	
+	if filter.Filter.Type != SeverityFilterSpecific {
+		t.Errorf("Expected specific filter type, got %v", filter.Filter.Type)
+	}
+	
+	if !filter.Filter.Severities[SeverityError] {
+		t.Error("Expected ERROR severity to be enabled")
+	}
+}
+
+func TestSetFlagsWithGlobAndSeverityFiltering(t *testing.T) {
+	dm := NewDebugManager()
+	dm.RegisterFlags([]FlagDefinition{
+		{TestFlag1, "test1", "test.flag1"},
+		{TestFlag2, "test2", "test.flag2"},
+		{TestFlag3, "test3", "other.flag3"},
+	})
+	
+	// Test glob pattern with severity filter
+	err := dm.SetFlags("test.*:+WARN")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	
+	if !dm.IsEnabled(TestFlag1) {
+		t.Error("Expected TestFlag1 to be enabled")
+	}
+	
+	if !dm.IsEnabled(TestFlag2) {
+		t.Error("Expected TestFlag2 to be enabled")
+	}
+	
+	if dm.IsEnabled(TestFlag3) {
+		t.Error("Expected TestFlag3 to be disabled")
+	}
+	
+	if len(dm.pathSeverityFilters) != 1 {
+		t.Errorf("Expected 1 path severity filter, got %d", len(dm.pathSeverityFilters))
+	}
+	
+	filter := dm.pathSeverityFilters[0]
+	if filter.Pattern != "test.*" {
+		t.Errorf("Expected pattern 'test.*', got '%s'", filter.Pattern)
+	}
+	
+	if filter.Filter.Type != SeverityFilterMin {
+		t.Errorf("Expected min filter type, got %v", filter.Filter.Type)
+	}
+	
+	if filter.Filter.MinSeverity != SeverityWarning {
+		t.Errorf("Expected min severity WARN, got %v", filter.Filter.MinSeverity)
+	}
+}
+
+func TestShouldLogWithPathSeverity(t *testing.T) {
+	dm := NewDebugManager()
+	dm.RegisterFlags([]FlagDefinition{
+		{TestFlag1, "test1", "test.flag1"},
+		{TestFlag2, "test2", "test.flag2"},
+	})
+	
+	// Set up path severity filters
+	dm.pathSeverityFilters = []PathSeverityFilter{
+		{
+			Pattern: "test.flag1",
+			Filter: SeverityFilter{
+				Type:       SeverityFilterSpecific,
+				Severities: map[Severity]bool{SeverityError: true},
+			},
+		},
+		{
+			Pattern: "test.*",
+			Filter: SeverityFilter{
+				Type:        SeverityFilterMin,
+				MinSeverity: SeverityWarning,
+			},
+		},
+	}
+	
+	// Test specific severity filter
+	if !dm.shouldLogWithPathSeverity("test.flag1", SeverityError) {
+		t.Error("Expected ERROR to be logged for test.flag1")
+	}
+	
+	if dm.shouldLogWithPathSeverity("test.flag1", SeverityInfo) {
+		t.Error("Expected INFO to not be logged for test.flag1")
+	}
+	
+	// Test min severity filter
+	if !dm.shouldLogWithPathSeverity("test.flag2", SeverityWarning) {
+		t.Error("Expected WARNING to be logged for test.flag2")
+	}
+	
+	if !dm.shouldLogWithPathSeverity("test.flag2", SeverityError) {
+		t.Error("Expected ERROR to be logged for test.flag2")
+	}
+	
+	if dm.shouldLogWithPathSeverity("test.flag2", SeverityInfo) {
+		t.Error("Expected INFO to not be logged for test.flag2")
+	}
+	
+	// Test no matching pattern
+	if dm.shouldLogWithPathSeverity("other.flag", SeverityError) {
+		t.Error("Expected no logging for unmatched pattern")
+	}
+}
+
+func TestCheckSeverityFilter(t *testing.T) {
+	dm := NewDebugManager()
+	
+	// Test SeverityFilterAll
+	filter := SeverityFilter{Type: SeverityFilterAll}
+	if !dm.checkSeverityFilter(SeverityTrace, filter) {
+		t.Error("Expected all severities to pass SeverityFilterAll")
+	}
+	
+	// Test SeverityFilterMin
+	filter = SeverityFilter{
+		Type:        SeverityFilterMin,
+		MinSeverity: SeverityWarning,
+	}
+	if !dm.checkSeverityFilter(SeverityWarning, filter) {
+		t.Error("Expected WARNING to pass min filter")
+	}
+	if !dm.checkSeverityFilter(SeverityError, filter) {
+		t.Error("Expected ERROR to pass min filter")
+	}
+	if dm.checkSeverityFilter(SeverityInfo, filter) {
+		t.Error("Expected INFO to not pass min filter")
+	}
+	
+	// Test SeverityFilterSpecific
+	filter = SeverityFilter{
+		Type:       SeverityFilterSpecific,
+		Severities: map[Severity]bool{SeverityError: true, SeverityInfo: true},
+	}
+	if !dm.checkSeverityFilter(SeverityError, filter) {
+		t.Error("Expected ERROR to pass specific filter")
+	}
+	if !dm.checkSeverityFilter(SeverityInfo, filter) {
+		t.Error("Expected INFO to pass specific filter")
+	}
+	if dm.checkSeverityFilter(SeverityWarning, filter) {
+		t.Error("Expected WARNING to not pass specific filter")
+	}
+}
+
+func TestLogWithPathSeverityFiltering(t *testing.T) {
+	dm := NewDebugManager()
+	dm.RegisterFlags([]FlagDefinition{
+		{TestFlag1, "test1", "test.flag1"},
+	})
+	
+	// Set up severity filtering
+	err := dm.SetFlags("test1:ERROR")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	
+	// Capture stderr
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	
+	dm.LogWithSeverity(TestFlag1, SeverityError, "", "Error message") // Should be logged
+	dm.LogWithSeverity(TestFlag1, SeverityInfo, "", "Info message")   // Should not be logged
+	
+	w.Close()
+	os.Stderr = oldStderr
+	
+	// Read captured output
+	buf := make([]byte, 1024)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+	
+	if !strings.Contains(output, "Error message") {
+		t.Error("Expected error message to be logged")
+	}
+	
+	if strings.Contains(output, "Info message") {
+		t.Error("Expected info message to not be logged due to severity filter")
 	}
 }

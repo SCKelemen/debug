@@ -117,4 +117,74 @@ func main() {
 	fmt.Println("\n=== Example 6: Custom path logging ===")
 	dm.LogWithPath("custom.module", debug.SeverityInfo, "custom-context", "This is a custom path message")
 	dm.LogWithPath("another.module.submodule", debug.SeverityDebug, "", "This is another custom path message")
+
+	// Example 7: Path-based severity filtering
+	fmt.Println("\n=== Example 7: Path-based severity filtering ===")
+	
+	// Reset and set up path-based severity filters
+	dm = debug.NewDebugManager()
+	dm.RegisterFlags(flagDefinitions)
+	
+	// Set different severity filters for different paths
+	err = dm.SetFlags("http.*:ERROR,db.*:+WARN,validation:INFO|ERROR")
+	if err != nil {
+		log.Fatal(err)
+	}
+	
+	fmt.Println("Testing path-based severity filtering:")
+	fmt.Println("- http.*: only ERROR messages")
+	fmt.Println("- db.*: WARN and above")
+	fmt.Println("- validation: only INFO and ERROR messages")
+	
+	// HTTP messages - only ERROR should show
+	dm.LogWithSeverity(DebugHTTPRequest, debug.SeverityInfo, "", "HTTP request info")     // Won't show
+	dm.LogWithSeverity(DebugHTTPRequest, debug.SeverityWarning, "", "HTTP request warning") // Won't show
+	dm.LogWithSeverity(DebugHTTPRequest, debug.SeverityError, "", "HTTP request error")     // Will show
+	
+	// DB messages - WARN and above should show
+	dm.LogWithSeverity(DebugDBQuery, debug.SeverityInfo, "", "DB query info")       // Won't show
+	dm.LogWithSeverity(DebugDBQuery, debug.SeverityWarning, "", "DB query warning") // Will show
+	dm.LogWithSeverity(DebugDBQuery, debug.SeverityError, "", "DB query error")     // Will show
+	
+	// Validation messages - only INFO and ERROR should show
+	dm.LogWithSeverity(DebugValidation, debug.SeverityDebug, "", "Validation debug")   // Won't show
+	dm.LogWithSeverity(DebugValidation, debug.SeverityInfo, "", "Validation info")     // Will show
+	dm.LogWithSeverity(DebugValidation, debug.SeverityWarning, "", "Validation warning") // Won't show
+	dm.LogWithSeverity(DebugValidation, debug.SeverityError, "", "Validation error")   // Will show
+
+	// Example 8: Advanced severity filtering syntax
+	fmt.Println("\n=== Example 8: Advanced severity filtering syntax ===")
+	
+	// Reset and demonstrate different syntax options
+	dm = debug.NewDebugManager()
+	dm.RegisterFlags(flagDefinitions)
+	
+	// Mix of different syntaxes
+	err = dm.SetFlags("http.request:ERROR,http.response:+WARN,db.query:WARN+,validation:ERROR|INFO")
+	if err != nil {
+		log.Fatal(err)
+	}
+	
+	fmt.Println("Testing advanced severity filtering syntax:")
+	fmt.Println("- http.request:ERROR (only ERROR)")
+	fmt.Println("- http.response:+WARN (WARN and above)")
+	fmt.Println("- db.query:WARN+ (WARN and above, alternative syntax)")
+	fmt.Println("- validation:ERROR|INFO (only ERROR and INFO)")
+	
+	// Test the different syntaxes
+	dm.LogWithSeverity(DebugHTTPRequest, debug.SeverityInfo, "", "HTTP request info")     // Won't show
+	dm.LogWithSeverity(DebugHTTPRequest, debug.SeverityError, "", "HTTP request error")   // Will show
+	
+	dm.LogWithSeverity(DebugHTTPResponse, debug.SeverityInfo, "", "HTTP response info")   // Won't show
+	dm.LogWithSeverity(DebugHTTPResponse, debug.SeverityWarning, "", "HTTP response warning") // Will show
+	dm.LogWithSeverity(DebugHTTPResponse, debug.SeverityError, "", "HTTP response error") // Will show
+	
+	dm.LogWithSeverity(DebugDBQuery, debug.SeverityInfo, "", "DB query info")       // Won't show
+	dm.LogWithSeverity(DebugDBQuery, debug.SeverityWarning, "", "DB query warning") // Will show
+	dm.LogWithSeverity(DebugDBQuery, debug.SeverityError, "", "DB query error")     // Will show
+	
+	dm.LogWithSeverity(DebugValidation, debug.SeverityDebug, "", "Validation debug")   // Won't show
+	dm.LogWithSeverity(DebugValidation, debug.SeverityInfo, "", "Validation info")     // Will show
+	dm.LogWithSeverity(DebugValidation, debug.SeverityWarning, "", "Validation warning") // Won't show
+	dm.LogWithSeverity(DebugValidation, debug.SeverityError, "", "Validation error")   // Will show
 }

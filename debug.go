@@ -57,27 +57,51 @@ type FlagDefinition struct {
 	Path string
 }
 
+// PathSeverityFilter represents a severity filter for a specific path pattern
+type PathSeverityFilter struct {
+	Pattern string
+	Filter  SeverityFilter
+}
+
+// SeverityFilter represents how severity filtering should work
+type SeverityFilter struct {
+	Type        SeverityFilterType
+	Severities  map[Severity]bool // For specific severities
+	MinSeverity Severity          // For minimum severity
+}
+
+// SeverityFilterType represents the type of severity filtering
+type SeverityFilterType int
+
+const (
+	SeverityFilterAll SeverityFilterType = iota // Show all severities
+	SeverityFilterMin                            // Show minimum severity and above
+	SeverityFilterSpecific                       // Show only specific severities
+)
+
 // DebugManager manages debug flags and output
 type DebugManager struct {
-	flags          DebugFlag
-	severityFilter Severity
-	pathFilters    []string
-	globEnabled    bool
-	flagMap        map[string]DebugFlag
-	pathMap        map[DebugFlag]string
-	allFlags       []DebugFlag
+	flags              DebugFlag
+	severityFilter     Severity
+	pathFilters        []string
+	pathSeverityFilters []PathSeverityFilter
+	globEnabled        bool
+	flagMap            map[string]DebugFlag
+	pathMap            map[DebugFlag]string
+	allFlags           []DebugFlag
 }
 
 // NewDebugManager creates a new debug manager
 func NewDebugManager() *DebugManager {
 	return &DebugManager{
-		flags:          0,
-		severityFilter: SeverityTrace, // Show all by default
-		pathFilters:    []string{},
-		globEnabled:    true,
-		flagMap:        make(map[string]DebugFlag),
-		pathMap:        make(map[DebugFlag]string),
-		allFlags:       []DebugFlag{},
+		flags:               0,
+		severityFilter:      SeverityTrace, // Show all by default
+		pathFilters:         []string{},
+		pathSeverityFilters: []PathSeverityFilter{},
+		globEnabled:         true,
+		flagMap:             make(map[string]DebugFlag),
+		pathMap:             make(map[DebugFlag]string),
+		allFlags:            []DebugFlag{},
 	}
 }
 
@@ -96,6 +120,9 @@ func (dm *DebugManager) SetFlags(flags string) error {
 		return nil
 	}
 
+	// Clear existing path severity filters
+	dm.pathSeverityFilters = []PathSeverityFilter{}
+
 	// Parse comma-separated flags
 	flagNames := strings.Split(flags, ",")
 	for _, flagName := range flagNames {
@@ -104,30 +131,156 @@ func (dm *DebugManager) SetFlags(flags string) error {
 			continue
 		}
 
+		// Check if this flag has a severity filter
+		path, severityFilter, err := dm.parseFlagWithSeverity(flagName)
+		if err != nil {
+			return err
+		}
+
 		// Handle special cases
-		if flagName == "all" || flagName == "*" {
+		if path == "all" || path == "*" {
 			dm.flags = ^DebugFlag(0) // Set all bits
+			if severityFilter != nil {
+				dm.pathSeverityFilters = append(dm.pathSeverityFilters, PathSeverityFilter{
+					Pattern: "*",
+					Filter:  *severityFilter,
+				})
+			}
 			return nil
 		}
 
 		// Handle glob patterns
-		if dm.globEnabled && (strings.Contains(flagName, "*") || strings.Contains(flagName, "**")) {
-			dm.pathFilters = append(dm.pathFilters, flagName)
+		if dm.globEnabled && (strings.Contains(path, "*") || strings.Contains(path, "**")) {
+			dm.pathFilters = append(dm.pathFilters, path)
 			// Enable all flags that match the pattern
-			dm.enableFlagsMatchingPattern(flagName)
+			dm.enableFlagsMatchingPattern(path)
+			if severityFilter != nil {
+				dm.pathSeverityFilters = append(dm.pathSeverityFilters, PathSeverityFilter{
+					Pattern: path,
+					Filter:  *severityFilter,
+				})
+			}
 			continue
 		}
 
 		// Map flag names to flags
-		flag, exists := dm.flagMap[flagName]
+		flag, exists := dm.flagMap[path]
 		if !exists {
-			return fmt.Errorf("unknown debug flag: %s", flagName)
+			return fmt.Errorf("unknown debug flag: %s", path)
 		}
 
 		dm.flags |= flag
+		if severityFilter != nil {
+			flagPath := dm.pathMap[flag]
+			dm.pathSeverityFilters = append(dm.pathSeverityFilters, PathSeverityFilter{
+				Pattern: flagPath,
+				Filter:  *severityFilter,
+			})
+		}
 	}
 
 	return nil
+}
+
+// parseFlagWithSeverity parses a flag string that may contain severity filtering
+// Returns: path, severityFilter, error
+func (dm *DebugManager) parseFlagWithSeverity(flagStr string) (string, *SeverityFilter, error) {
+	// Check if there's a colon indicating severity filtering
+	parts := strings.SplitN(flagStr, ":", 2)
+	if len(parts) == 1 {
+		// No severity filter
+		return parts[0], nil, nil
+	}
+
+	path := parts[0]
+	severityStr := parts[1]
+
+	// Parse severity filter
+	severityFilter, err := dm.parseSeverityFilter(severityStr)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid severity filter '%s' for path '%s': %v", severityStr, path, err)
+	}
+
+	return path, severityFilter, nil
+}
+
+// parseSeverityFilter parses a severity filter string
+func (dm *DebugManager) parseSeverityFilter(severityStr string) (*SeverityFilter, error) {
+	severityStr = strings.TrimSpace(severityStr)
+
+	// Handle + prefix (e.g., +WARN means WARN and above)
+	if strings.HasPrefix(severityStr, "+") {
+		severityStr = severityStr[1:]
+		severity, err := dm.parseSeverity(severityStr)
+		if err != nil {
+			return nil, err
+		}
+		return &SeverityFilter{
+			Type:        SeverityFilterMin,
+			MinSeverity: severity,
+		}, nil
+	}
+
+	// Handle + suffix (e.g., WARN+ means WARN and above)
+	if strings.HasSuffix(severityStr, "+") {
+		severityStr = severityStr[:len(severityStr)-1]
+		severity, err := dm.parseSeverity(severityStr)
+		if err != nil {
+			return nil, err
+		}
+		return &SeverityFilter{
+			Type:        SeverityFilterMin,
+			MinSeverity: severity,
+		}, nil
+	}
+
+	// Handle multiple severities separated by | (e.g., ERROR|INFO)
+	if strings.Contains(severityStr, "|") {
+		severityParts := strings.Split(severityStr, "|")
+		severities := make(map[Severity]bool)
+		for _, part := range severityParts {
+			part = strings.TrimSpace(part)
+			severity, err := dm.parseSeverity(part)
+			if err != nil {
+				return nil, err
+			}
+			severities[severity] = true
+		}
+		return &SeverityFilter{
+			Type:       SeverityFilterSpecific,
+			Severities: severities,
+		}, nil
+	}
+
+	// Single severity
+	severity, err := dm.parseSeverity(severityStr)
+	if err != nil {
+		return nil, err
+	}
+	return &SeverityFilter{
+		Type:       SeverityFilterSpecific,
+		Severities: map[Severity]bool{severity: true},
+	}, nil
+}
+
+// parseSeverity parses a single severity string
+func (dm *DebugManager) parseSeverity(severityStr string) (Severity, error) {
+	switch strings.ToUpper(severityStr) {
+	case "TRACE":
+		return SeverityTrace, nil
+	case "DEBUG":
+		return SeverityDebug, nil
+	case "INFO":
+		return SeverityInfo, nil
+	case "WARNING", "WARN":
+		return SeverityWarning, nil
+	case "ERROR":
+		return SeverityError, nil
+	case "FATAL":
+		return SeverityFatal, nil
+	default:
+		return SeverityTrace, fmt.Errorf("unknown severity: %s", severityStr)
+	}
 }
 
 // SetSeverityFilter sets the minimum severity level to show
@@ -220,19 +373,26 @@ func (dm *DebugManager) LogWithPath(path string, severity Severity, context stri
 
 // shouldLog determines if a message should be logged based on flag and severity
 func (dm *DebugManager) shouldLog(flag DebugFlag, severity Severity) bool {
-	// Check severity filter
-	if severity < dm.severityFilter {
-		return false
-	}
-
 	// Check if flag is enabled
 	if !dm.IsEnabled(flag) {
 		return false
 	}
 
+	path := dm.pathMap[flag]
+
+	// Check path-specific severity filters first
+	if len(dm.pathSeverityFilters) > 0 {
+		// If there are path-specific filters, only use them
+		return dm.shouldLogWithPathSeverity(path, severity)
+	}
+
+	// Fall back to global severity filter
+	if severity < dm.severityFilter {
+		return false
+	}
+
 	// Check path filters if glob is enabled
 	if dm.globEnabled && len(dm.pathFilters) > 0 {
-		path := dm.pathMap[flag]
 		return dm.matchesPathFilters(path)
 	}
 
@@ -241,7 +401,12 @@ func (dm *DebugManager) shouldLog(flag DebugFlag, severity Severity) bool {
 
 // shouldLogPath determines if a message should be logged based on path and severity
 func (dm *DebugManager) shouldLogPath(path string, severity Severity) bool {
-	// Check severity filter
+	// Check path-specific severity filters first
+	if dm.shouldLogWithPathSeverity(path, severity) {
+		return true
+	}
+
+	// Fall back to global severity filter
 	if severity < dm.severityFilter {
 		return false
 	}
@@ -252,6 +417,37 @@ func (dm *DebugManager) shouldLogPath(path string, severity Severity) bool {
 	}
 
 	return true
+}
+
+// shouldLogWithPathSeverity checks if a message should be logged based on path-specific severity filters
+func (dm *DebugManager) shouldLogWithPathSeverity(path string, severity Severity) bool {
+	// Check if there are any path-specific severity filters
+	if len(dm.pathSeverityFilters) == 0 {
+		return false
+	}
+
+	// Find matching path severity filters
+	for _, pathFilter := range dm.pathSeverityFilters {
+		if dm.matchesGlob(path, pathFilter.Pattern) {
+			return dm.checkSeverityFilter(severity, pathFilter.Filter)
+		}
+	}
+
+	return false
+}
+
+// checkSeverityFilter checks if a severity matches a severity filter
+func (dm *DebugManager) checkSeverityFilter(severity Severity, filter SeverityFilter) bool {
+	switch filter.Type {
+	case SeverityFilterAll:
+		return true
+	case SeverityFilterMin:
+		return severity >= filter.MinSeverity
+	case SeverityFilterSpecific:
+		return filter.Severities[severity]
+	default:
+		return false
+	}
 }
 
 // matchesPathFilters checks if a path matches any of the path filters
