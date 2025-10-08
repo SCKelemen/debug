@@ -302,7 +302,7 @@ The debug system supports sophisticated severity filtering per path, allowing yo
 | `path:SEVERITY` | Only show specific severity | `http.request:ERROR` |
 | `path:+SEVERITY` | Show severity and above | `db.*:+WARN` |
 | `path:SEVERITY+` | Show severity and above (alternative) | `validation:INFO+` |
-| `path:SEVERITY1|SEVERITY2` | Show multiple specific severities | `auth:ERROR|INFO` |
+| `path:SEVERITY1|SEVERITY2` | Show multiple specific severities | `auth:ERROR|INFO` or `auth:(ERROR|INFO)` |
 
 #### Examples
 
@@ -314,7 +314,8 @@ dm.SetFlags("http.request:ERROR")
 dm.SetFlags("db.*:+WARN")
 
 // Show only INFO and ERROR for validation (skip DEBUG, WARN)
-dm.SetFlags("validation:INFO|ERROR")
+dm.SetFlags("validation:INFO|ERROR")        // Simple syntax
+dm.SetFlags("validation:(INFO|ERROR)")      // Explicit grouping (equivalent)
 
 // Mix different patterns
 dm.SetFlags("http.*:ERROR,db.*:+WARN,validation:INFO|ERROR")
@@ -332,7 +333,7 @@ Perfect for configuration files and environment variables:
 export DEBUG_FLAGS="http.*:ERROR,db.*:+WARN,validation"
 
 # Show only errors and info for specific modules
-export DEBUG_FLAGS="auth:ERROR|INFO,payment:ERROR,logging:WARN+"
+export DEBUG_FLAGS="auth:ERROR|INFO,payment:ERROR,logging:WARN+"  # or auth:(ERROR|INFO)
 
 # Production-like configuration
 export DEBUG_FLAGS="*:ERROR"
