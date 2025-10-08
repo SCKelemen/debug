@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"github.com/SCKelemen/debug/debug"
+
+	debug "github.com/SCKelemen/debug"
 )
 
 // V2Parser implements FlagParser for logical expression flag strings

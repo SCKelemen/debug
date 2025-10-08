@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/SCKelemen/debug/debug"
+	debug "github.com/SCKelemen/debug"
 	v1parser "github.com/SCKelemen/debug/v1/parser"
 	v2parser "github.com/SCKelemen/debug/v2/parser"
 )
