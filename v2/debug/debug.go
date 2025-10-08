@@ -1,4 +1,4 @@
-package v2
+package debug
 
 import (
 	"fmt"
@@ -399,13 +399,13 @@ func (dm *DebugManager) evaluateExpressionToFlags(node *ExpressionNode) (DebugFl
 // evaluateGlobPattern evaluates a glob pattern and returns the matching flags
 func (dm *DebugManager) evaluateGlobPattern(pattern string) (DebugFlag, error) {
 	var result DebugFlag
-	
+
 	for flag, path := range dm.pathMap {
 		if dm.matchesGlob(path, pattern) {
 			result |= flag
 		}
 	}
-	
+
 	return result, nil
 }
 
@@ -568,7 +568,7 @@ func (dm *DebugManager) LogWithSeverity(flag DebugFlag, severity Severity, conte
 func (dm *DebugManager) shouldLog(flag DebugFlag, severity Severity) bool {
 	// Combine the flag with current context
 	combinedFlag := flag | dm.GetContext()
-	
+
 	// Check if the combined flag (including context) is enabled
 	if !dm.IsEnabled(combinedFlag) {
 		return false
@@ -651,7 +651,7 @@ func (dm *DebugManager) PopContext() DebugFlag {
 	if len(dm.contextStack) == 0 {
 		return 0
 	}
-	
+
 	lastIndex := len(dm.contextStack) - 1
 	flag := dm.contextStack[lastIndex]
 	dm.contextStack = dm.contextStack[:lastIndex]
@@ -685,7 +685,7 @@ func (dm *DebugManager) getPathWithContext(flag DebugFlag) string {
 	if path == "" {
 		path = "unknown"
 	}
-	
+
 	// Add context information if available
 	context := dm.GetContext()
 	if context != 0 {
@@ -699,7 +699,7 @@ func (dm *DebugManager) getPathWithContext(flag DebugFlag) string {
 			path = fmt.Sprintf("%s (ctx: %s)", path, strings.Join(contextPaths, " -> "))
 		}
 	}
-	
+
 	return path
 }
 

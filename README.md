@@ -19,7 +19,6 @@ Both versions share the same API and are fully compatible.
 - **Hierarchical Organization**: Organize flags into logical trees (e.g., `http.request`, `db.query`)
 - **Glob Pattern Matching**: Enable multiple flags using patterns like `http.*` or `db.*`
 - **Path-based Severity Filtering**: Filter log messages by severity level for specific paths
-- **Multi-Flag Logging**: Log based on combinations of flags with explicit ANY/ALL logic
 - **Logical Expressions (V2)**: Advanced flag configuration with logical operators (`|`, `&`, `!`, `()`)
 - **Slog Integration**: Structured logging with Go's standard `log/slog` package
 - **Context Support**: Add contextual information to debug messages with hierarchical inheritance
@@ -30,10 +29,10 @@ Both versions share the same API and are fully compatible.
 
 ```bash
 # For V1 (simple configuration)
-go get github.com/SCKelemen/debug/v1
+go get github.com/SCKelemen/debug/v1/debug
 
 # For V2 (logical expressions)
-go get github.com/SCKelemen/debug/v2
+go get github.com/SCKelemen/debug/v2/debug
 ```
 
 ## Quick Start
@@ -44,12 +43,12 @@ go get github.com/SCKelemen/debug/v2
 package main
 
 import (
-    "github.com/SCKelemen/debug/v1"
+    "github.com/SCKelemen/debug/v1/debug"
 )
 
 // Define your debug flags
 const (
-    DebugHTTPRequest  v1.DebugFlag = 1 << iota
+    DebugHTTPRequest  debug.DebugFlag = 1 << iota
     DebugHTTPResponse
     DebugDBQuery
     DebugValidation
@@ -57,10 +56,10 @@ const (
 
 func main() {
     // Create V1 debug manager
-    dm := v1.NewDebugManager()
+    dm := debug.NewDebugManager()
     
     // Register flags
-    dm.RegisterFlags([]v1.FlagDefinition{
+    dm.RegisterFlags([]debug.FlagDefinition{
         {Flag: DebugHTTPRequest, Name: "http.request", Path: "http.request"},
         {Flag: DebugHTTPResponse, Name: "http.response", Path: "http.response"},
         {Flag: DebugDBQuery, Name: "db.query", Path: "db.query"},
@@ -82,12 +81,12 @@ func main() {
 package main
 
 import (
-    "github.com/SCKelemen/debug/v2"
+    "github.com/SCKelemen/debug/v2/debug"
 )
 
 // Define your debug flags
 const (
-    DebugHTTPRequest  v2.DebugFlag = 1 << iota
+    DebugHTTPRequest  debug.DebugFlag = 1 << iota
     DebugHTTPResponse
     DebugDBQuery
     DebugValidation
@@ -95,10 +94,10 @@ const (
 
 func main() {
     // Create V2 debug manager
-    dm := v2.NewDebugManager()
+    dm := debug.NewDebugManager()
     
     // Register flags
-    dm.RegisterFlags([]v2.FlagDefinition{
+    dm.RegisterFlags([]debug.FlagDefinition{
         {Flag: DebugHTTPRequest, Name: "http.request", Path: "http.request"},
         {Flag: DebugHTTPResponse, Name: "http.response", Path: "http.response"},
         {Flag: DebugDBQuery, Name: "db.query", Path: "db.query"},
@@ -113,6 +112,38 @@ func main() {
     dm.Log(DebugDBQuery, "Executing SELECT * FROM users")
 }
 ```
+
+## Upgrade Path
+
+Upgrading from V1 to V2 is incredibly simple - just change the import path! All your existing code continues to work unchanged.
+
+### Before (V1)
+```go
+import "github.com/SCKelemen/debug/v1/debug"
+
+dm := debug.NewDebugManager()
+dm.SetFlags("http.*,db.query")  // V1 syntax
+```
+
+### After (V2)
+```go
+import "github.com/SCKelemen/debug/v2/debug"
+
+dm := debug.NewDebugManager()
+dm.SetFlags("http.*,db.query")  // Still works!
+dm.SetFlags("http.request|db.query")  // Now you can also use logical expressions
+```
+
+### Benefits of Upgrading
+- ✅ **Zero breaking changes** - all V1 code works unchanged
+- ✅ **New capabilities** - logical expressions for complex flag combinations
+- ✅ **Same performance** - V2 is just as fast as V1 for simple use cases
+- ✅ **Future-proof** - V2 will receive all new features
+
+### Migration Steps
+1. Change import: `github.com/SCKelemen/debug/v1/debug` → `github.com/SCKelemen/debug/v2/debug`
+2. That's it! Your code continues to work exactly the same
+3. Optionally, start using logical expressions for more complex flag combinations
 
 ## API Reference
 
@@ -192,79 +223,7 @@ func (dm *DebugManager) LogWithContext(flag DebugFlag, context string, format st
 
 Logging with context information.
 
-```go
-func (dm *DebugManager) LogWithFlags(flags DebugFlag, format string, args ...interface{})
-```
 
-Multi-flag logging for granular control. Logs if ANY of the specified flags are enabled.
-
-```go
-func (dm *DebugManager) LogWithFlagsAndSeverity(flags DebugFlag, severity Severity, context string, format string, args ...interface{})
-```
-
-Multi-flag logging with custom severity and optional context.
-
-```go
-func (dm *DebugManager) LogWithFlagsAndContext(flags DebugFlag, context string, format string, args ...interface{})
-```
-
-Multi-flag logging with context information.
-
-```go
-func (dm *DebugManager) LogWithAnyFlags(flags DebugFlag, format string, args ...interface{})
-```
-
-Multi-flag logging that logs if ANY of the specified flags are enabled.
-
-```go
-func (dm *DebugManager) LogWithAllFlags(flags DebugFlag, format string, args ...interface{})
-```
-
-Multi-flag logging that logs if ALL of the specified flags are enabled.
-
-```go
-func (dm *DebugManager) LogWithAnyFlagsAndSeverity(flags DebugFlag, severity Severity, context string, format string, args ...interface{})
-```
-
-Multi-flag logging with ANY logic, custom severity and optional context.
-
-```go
-func (dm *DebugManager) LogWithAllFlagsAndSeverity(flags DebugFlag, severity Severity, context string, format string, args ...interface{})
-```
-
-Multi-flag logging with ALL logic, custom severity and optional context.
-
-#### V2 Logical Expression Methods
-
-```go
-func (dm *DebugManager) LogWithExpression(expression string, format string, args ...interface{})
-```
-
-V2 logical expression logging. Supports complex logical operators (`|`, `&`, `!`, `()`).
-
-```go
-func (dm *DebugManager) LogWithExpressionAndSeverity(expression string, severity Severity, context string, format string, args ...interface{})
-```
-
-V2 logical expression logging with custom severity and optional context.
-
-```go
-func (dm *DebugManager) LogWithExpressionAndContext(expression string, context string, format string, args ...interface{})
-```
-
-V2 logical expression logging with context information.
-
-```go
-func (dm *DebugManager) LogWithAnyFlagsAndContext(flags DebugFlag, context string, format string, args ...interface{})
-```
-
-Multi-flag logging with ANY logic and context information.
-
-```go
-func (dm *DebugManager) LogWithAllFlagsAndContext(flags DebugFlag, context string, format string, args ...interface{})
-```
-
-Multi-flag logging with ALL logic and context information.
 
 ```go
 func (dm *DebugManager) LogWithPath(path string, severity Severity, context string, format string, args ...interface{})
@@ -343,7 +302,7 @@ The debug system supports sophisticated severity filtering per path, allowing yo
 | `path:SEVERITY` | Only show specific severity | `http.request:ERROR` |
 | `path:+SEVERITY` | Show severity and above | `db.*:+WARN` |
 | `path:SEVERITY+` | Show severity and above (alternative) | `validation:INFO+` |
-| `path:SEVERITY1\|SEVERITY2` | Show multiple specific severities | `auth:ERROR\|INFO` |
+| `path:SEVERITY1|SEVERITY2` | Show multiple specific severities | `auth:ERROR|INFO` |
 
 #### Examples
 
@@ -546,65 +505,6 @@ export DEBUG_FLAGS="api.*.auth.login:DEBUG,api.*.auth.logout:ERROR"
 export DEBUG_FLAGS="api.*.auth.*:DEBUG,api.*.payment.*:ERROR,api.*.user.*:INFO"
 ```
 
-### Multi-Flag Logging
-
-Multi-flag logging allows you to combine multiple debug flags for more granular control. The library provides two distinct approaches:
-
-#### ANY Logic (Default)
-Logs if **ANY** of the specified flags are enabled. Useful for contextual debugging.
-
-#### ALL Logic (Explicit)
-Logs if **ALL** of the specified flags are enabled. Useful for precise conditional logging.
-
-#### Use Cases
-
-**ANY Logic Examples:**
-- **Operations within auth flow**: `LogWithAnyFlags(DebugAPIV1AuthLogin|DebugHTTPRequest, ...)` - shows any operation that happens during auth login
-- **Contextual debugging**: `LogWithAnyFlags(DebugAPIV1AuthLogin|DebugDBQuery, ...)` - shows DB queries when they happen in auth context
-
-**ALL Logic Examples:**
-- **DB queries within auth flow**: `LogWithAllFlags(DebugAPIV1AuthLogin|DebugDBQuery, ...)` - only shows DB queries that happen during auth login (both flags must be enabled)
-- **Precise conditional logging**: `LogWithAllFlags(DebugAPIV1AuthLogin|DebugValidation, ...)` - only shows validation during auth login
-
-#### Examples
-
-```go
-// Enable specific flags
-dm.SetFlags("api.v1.auth.login,db.query,http.request")
-
-// ANY logic: logs if any flag is enabled (default behavior)
-dm.LogWithFlags(DebugAPIV1AuthLogin|DebugDBQuery, "DB query in auth login: %s", "SELECT * FROM users WHERE id = ?")
-
-// ANY logic: explicit method
-dm.LogWithAnyFlags(DebugAPIV1AuthLogin|DebugHTTPRequest, "HTTP request in auth login: %s", "POST /api/v1/auth/login")
-
-// ALL logic: logs only if ALL flags are enabled
-dm.LogWithAllFlags(DebugAPIV1AuthLogin|DebugDBQuery, "DB query in auth login: %s", "SELECT * FROM users WHERE id = ?")
-
-// Multi-flag logging with severity
-dm.LogWithAnyFlagsAndSeverity(DebugAPIV1AuthLogin|DebugDBQuery, SeverityError, "", "Critical DB error in auth login: %s", "connection timeout")
-dm.LogWithAllFlagsAndSeverity(DebugAPIV1AuthLogin|DebugDBQuery, SeverityError, "", "Critical DB error in auth login: %s", "connection timeout")
-
-// Multi-flag logging with context
-dm.LogWithAnyFlagsAndContext(DebugAPIV1AuthLogin|DebugHTTPRequest, "auth-service", "HTTP request in auth login: %s", "POST /api/v1/auth/login")
-dm.LogWithAllFlagsAndContext(DebugAPIV1AuthLogin|DebugHTTPRequest, "auth-service", "HTTP request in auth login: %s", "POST /api/v1/auth/login")
-```
-
-#### Output Format
-
-Multi-flag logging shows the combined path in the log output:
-```
-DEBUG [db.query|api.v1.auth.login]: DB query in auth login: SELECT * FROM users WHERE id = ?
-ERROR [db.query|api.v1.auth.login]: Critical DB error in auth login: connection timeout
-DEBUG [http.request|api.v1.auth.login] auth-service: HTTP request in auth login: POST /api/v1/auth/login
-```
-
-#### Behavior
-
-- **Logs if ANY of the specified flags are enabled** - this allows you to see operations within specific contexts
-- **Combined path display** - shows all enabled flags in the path, separated by `|`
-- **Severity filtering applies** - respects both global and path-specific severity filters
-- **Context support** - works with all logging variants (basic, severity, context)
 
 ### Performance Considerations
 
@@ -612,105 +512,12 @@ DEBUG [http.request|api.v1.auth.login] auth-service: HTTP request in auth login:
 - Glob pattern matching is only performed when patterns are used
 - Severity filtering is applied before any other checks
 - Path filters are only checked when glob patterns are enabled
-- Multi-flag logging uses efficient bitwise operations for flag combination checking
 
 ### Thread Safety
 
 The `DebugManager` is not thread-safe by design. If you need thread-safe access, wrap it with appropriate synchronization primitives or create separate instances per goroutine.
 
-## V2 Logical Expressions
 
-The debug library supports two versions of logical expression handling:
-
-### V1: Simple Flag Enablement (Current Default)
-
-V1 uses simple flag enablement logic in Go code:
-```go
-// Go code: Combine flags with bitwise OR
-dm.LogWithFlags(DebugAPIV1AuthLogin|DebugDBQuery, "message")
-
-// Configuration: Simple comma-separated flags
-dm.SetFlags("api.v1.auth.login,db.query")
-```
-
-### V2: Logical Expression Parsing
-
-V2 supports complex logical expressions in the configuration string:
-```go
-// Go code: Use expression string
-dm.LogWithExpression("api.v1.auth.login|db.query&http.request", "message")
-
-// Configuration: Logical expressions with operators
-dm.SetFlags("api.v1.auth.login|db.query&http.request")
-```
-
-### V2 Operators
-
-- **`|` (OR)**: Log if any of the flags are enabled
-- **`&` (AND)**: Log only if all flags are enabled  
-- **`!` (NOT)**: Log if the flag is NOT enabled
-- **`()` (Grouping)**: Override operator precedence
-
-### V2 Examples
-
-```go
-// Simple expressions
-dm.LogWithExpression("api.v1.auth.login", "Simple flag")
-dm.LogWithExpression("!validation", "NOT validation")
-
-// OR expressions
-dm.LogWithExpression("api.v1.auth.login|db.query", "Either flag enabled")
-dm.LogWithExpression("validation|http.request", "Either flag enabled")
-
-// AND expressions
-dm.LogWithExpression("api.v1.auth.login&db.query", "Both flags enabled")
-dm.LogWithExpression("api.v1.auth.login&validation", "Both flags enabled")
-
-// Complex expressions with parentheses
-dm.LogWithExpression("(api.v1.auth.login|validation)&db.query", "Complex logic")
-dm.LogWithExpression("(http.request|validation)&api.v1.auth.login", "Complex logic")
-
-// Operator precedence (AND before OR)
-dm.LogWithExpression("api.v1.auth.login|db.query&http.request", "Precedence: api.v1.auth.login OR (db.query AND http.request)")
-dm.LogWithExpression("(api.v1.auth.login|db.query)&http.request", "Explicit grouping: (api.v1.auth.login OR db.query) AND http.request")
-```
-
-### V1 vs V2 Comparison
-
-| Feature | V1 | V2 |
-|---------|----|----|
-| **Complexity** | Simple flag enablement | Logical expression parsing |
-| **Go Code** | `LogWithFlags(flag1\|flag2, "msg")` | `LogWithExpression("flag1\|flag2", "msg")` |
-| **Configuration** | `"flag1,flag2"` | `"flag1\|flag2"` |
-| **Operators** | Bitwise OR only | `\|`, `&`, `!`, `()` |
-| **Use Case** | Simple combinations | Complex logical conditions |
-| **Performance** | Faster (bitwise operations) | Slower (expression parsing) |
-| **Backward Compatible** | Yes | Yes (V1 still works) |
-
-### Migration Guide
-
-**From V1 to V2:**
-```go
-// V1 approach
-dm.LogWithFlags(DebugAPIV1AuthLogin|DebugDBQuery, "message")
-
-// V2 approach (equivalent)
-dm.LogWithExpression("api.v1.auth.login|db.query", "message")
-
-// V2 approach (more complex)
-dm.LogWithExpression("(api.v1.auth.login|api.v2.auth.login)&db.query", "message")
-```
-
-**When to use V1:**
-- Simple flag combinations
-- Performance-critical code paths
-- Straightforward enable/disable logic
-
-**When to use V2:**
-- Complex logical conditions
-- Dynamic expression evaluation
-- Configuration-driven logic
-- Need for NOT operations or grouping
 
 ## Slog Integration
 

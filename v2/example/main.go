@@ -5,15 +5,15 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/SCKelemen/debug/v2"
+	"github.com/SCKelemen/debug/v2/debug"
 )
 
 func main() {
 	// Create a new V2 debug manager
-	dm := v2.NewDebugManager()
+	dm := debug.NewDebugManager()
 
 	// Define some example flags
-	flagDefinitions := []v2.FlagDefinition{
+	flagDefinitions := []debug.FlagDefinition{
 		{Flag: 1 << 0, Name: "http.request", Path: "http.request"},
 		{Flag: 1 << 1, Name: "http.response", Path: "http.response"},
 		{Flag: 1 << 2, Name: "db.query", Path: "db.query"},
@@ -51,7 +51,7 @@ func main() {
 	dm.SetFlags("http.request&db.query")
 	dm.Log(1<<0, "HTTP request (won't log - AND requires both flags)")
 	dm.Log(1<<2, "Database query (won't log - AND requires both flags)")
-	
+
 	// Enable both flags to see AND behavior
 	dm.SetFlags("http.request,db.query") // Enable both
 	dm.SetFlags("http.request&db.query") // Now apply AND filter
@@ -79,27 +79,27 @@ func main() {
 	// Example 6: V2 with path-based severity filtering
 	fmt.Println("Example 6: V2 with path-based severity filtering")
 	dm.SetFlags("(http.*|db.*):ERROR")
-	dm.LogWithSeverity(1<<0, v2.SeverityInfo, "", "HTTP request info")     // Won't log (only ERROR)
-	dm.LogWithSeverity(1<<0, v2.SeverityError, "", "HTTP request failed")  // Will log
-	dm.LogWithSeverity(1<<2, v2.SeverityInfo, "", "DB query info")         // Won't log (only ERROR)
-	dm.LogWithSeverity(1<<2, v2.SeverityError, "", "DB query failed")      // Will log
-	dm.LogWithSeverity(1<<7, v2.SeverityError, "", "Validation error")     // Won't log (not in pattern)
+	dm.LogWithSeverity(1<<0, debug.SeverityInfo, "", "HTTP request info")    // Won't log (only ERROR)
+	dm.LogWithSeverity(1<<0, debug.SeverityError, "", "HTTP request failed") // Will log
+	dm.LogWithSeverity(1<<2, debug.SeverityInfo, "", "DB query info")        // Won't log (only ERROR)
+	dm.LogWithSeverity(1<<2, debug.SeverityError, "", "DB query failed")     // Will log
+	dm.LogWithSeverity(1<<7, debug.SeverityError, "", "Validation error")    // Won't log (not in pattern)
 	fmt.Println()
 
 	// Example 7: Context system with V2
 	fmt.Println("Example 7: Context system with V2")
 	dm.SetFlags("api.v1.auth.*|db.*")
-	
+
 	// Simulate an API handler with context
 	dm.WithContext(1<<4, func() { // api.v1.auth.login context
 		dm.Log(1<<4, "Starting auth login process")
-		
+
 		// Nested context for database operations
 		dm.WithContext(1<<2, func() { // db.query context
 			dm.Log(1<<2, "Querying user credentials")
 			dm.Log(1<<3, "Establishing DB connection")
 		})
-		
+
 		dm.Log(1<<4, "Auth login completed")
 	})
 	fmt.Println()
@@ -107,24 +107,24 @@ func main() {
 	// Example 8: Slog integration with V2
 	fmt.Println("Example 8: Slog integration with V2")
 	dm.SetFlags("http.request|db.query")
-	
+
 	// Traditional logging
 	fmt.Println("Traditional logging:")
 	dm.Log(1<<0, "Traditional HTTP request")
 	dm.Log(1<<2, "Traditional DB query")
-	
+
 	// Enable slog with text handler
 	fmt.Println("\nSlog text handler:")
 	dm.EnableSlog()
 	dm.Log(1<<0, "Slog HTTP request")
 	dm.Log(1<<2, "Slog DB query")
-	
+
 	// Enable slog with JSON handler
 	fmt.Println("\nSlog JSON handler:")
 	dm.EnableSlogWithHandler(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	dm.Log(1<<0, "Slog JSON HTTP request")
 	dm.Log(1<<2, "Slog JSON DB query")
-	
+
 	// Disable slog
 	dm.DisableSlog()
 	fmt.Println("\nBack to traditional logging:")
