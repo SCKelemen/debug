@@ -2,7 +2,7 @@
 
 # Run tests
 test:
-	go test -v .
+	go test -v ./...
 
 # Run examples
 examples:
