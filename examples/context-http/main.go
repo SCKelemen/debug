@@ -1,10 +1,10 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -12,19 +12,12 @@ import (
 	v2parser "github.com/SCKelemen/debug/v2/parser"
 )
 
-// WithDebugFlag adds a debug flag to the context (immutable, like standard Go context)
-func WithDebugFlag(ctx context.Context, flag debug.DebugFlag, description string, dm *debug.DebugManager) context.Context {
-	// Get existing flags from context
-	existingFlags := debug.GetDebugFlagsFromContext(ctx)
-
-	// Combine with new flag
-	combinedFlags := existingFlags | flag
-
-	// Create new context with combined flags
-	newCtx := debug.WithDebugFlags(ctx, combinedFlags)
-
-	return newCtx
-}
+// Static context flags - set at compile time
+const (
+	APIV1AuthLogin = debug.DebugFlag(1 << 0) // api.v1.auth.login
+	DatabaseQuery  = debug.DebugFlag(1 << 2) // db.query
+	HTTPRequest    = debug.DebugFlag(1 << 3) // http.request
+)
 
 // Mock database service
 type DatabaseService struct {
@@ -35,124 +28,143 @@ func NewDatabaseService(dm *debug.DebugManager) *DatabaseService {
 	return &DatabaseService{dm: dm}
 }
 
-func (db *DatabaseService) GetUser(ctx context.Context, userID string) (*User, error) {
-	// Add database query context - inherits parent context
-	ctx = WithDebugFlag(ctx, debug.DebugFlag(1<<2), "db.query", db.dm)
+func (db *DatabaseService) GetUser(userID string) (*User, error) {
+	// Create method context - this persists for the entire method
+	mc := db.dm.WithMethodContext(DatabaseQuery)
 
 	// Log the database query
-	db.dm.Log(ctx, 1<<2, "Executing database query: SELECT * FROM users WHERE id = %s", userID)
+	mc.Debug(fmt.Sprintf("Executing database query: SELECT * FROM users WHERE id = %s", userID))
 
 	// Simulate database work
 	time.Sleep(10 * time.Millisecond)
 
 	// Log query completion
-	db.dm.Log(ctx, 1<<2, "Database query completed for user: %s", userID)
+	mc.Info(fmt.Sprintf("Database query completed for user: %s", userID))
 
 	return &User{ID: userID, Name: "John Doe", Email: "john@example.com"}, nil
 }
 
-func (db *DatabaseService) UpdateUser(ctx context.Context, user *User) error {
-	// Add database query context - inherits parent context
-	ctx = WithDebugFlag(ctx, debug.DebugFlag(1<<2), "db.query", db.dm)
+func (db *DatabaseService) ValidatePassword(userID, password string) bool {
+	// Create method context - this persists for the entire method
+	mc := db.dm.WithMethodContext(DatabaseQuery)
 
-	// Log the database update
-	db.dm.Log(ctx, 1<<2, "Executing database update: UPDATE users SET name = %s WHERE id = %s", user.Name, user.ID)
+	// Log password validation
+	mc.Debug(fmt.Sprintf("Validating password for user: %s", userID))
 
-	// Simulate database work
-	time.Sleep(15 * time.Millisecond)
+	// Simulate validation work
+	time.Sleep(5 * time.Millisecond)
 
-	// Log update completion
-	db.dm.Log(ctx, 1<<2, "Database update completed for user: %s", user.ID)
+	// Log validation result
+	mc.Info(fmt.Sprintf("Password validation completed for user: %s", userID))
 
-	return nil
+	return password == "correctpassword"
 }
 
-// Mock user model
+// HTTP handler with method context
+type AuthHandler struct {
+	db *DatabaseService
+	dm *debug.DebugManager
+}
+
+func NewAuthHandler(db *DatabaseService, dm *debug.DebugManager) *AuthHandler {
+	return &AuthHandler{db: db, dm: dm}
+}
+
+func (h *AuthHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
+	// Create method context - this persists for the entire method
+	mc := h.dm.WithMethodContext(APIV1AuthLogin)
+
+	// Log HTTP request
+	mc.Info(fmt.Sprintf("HTTP request received: %s %s", r.Method, r.URL.Path))
+	mc.Debug(fmt.Sprintf("Request headers: %v", r.Header))
+	mc.Debug(fmt.Sprintf("Remote address: %s", r.RemoteAddr))
+
+	// Extract user credentials from request
+	userID := r.URL.Query().Get("user_id")
+	password := r.URL.Query().Get("password")
+
+	if userID == "" || password == "" {
+		mc.Warn("Missing user credentials in request")
+		http.Error(w, "Missing user credentials", http.StatusBadRequest)
+		return
+	}
+
+	// Log authentication attempt
+	mc.Info(fmt.Sprintf("Authentication attempt for user: %s", userID))
+
+	// Call database service - it has its own method context
+	user, err := h.db.GetUser(userID)
+	if err != nil {
+		mc.Error("User not found")
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// Validate password
+	if !h.db.ValidatePassword(userID, password) {
+		mc.Error("Invalid password")
+		http.Error(w, "Invalid password", http.StatusUnauthorized)
+		return
+	}
+
+	// Log successful authentication
+	mc.Info(fmt.Sprintf("Authentication successful for user: %s", user.Email))
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"status": "success", "user_id": "%s", "email": "%s"}`, user.ID, user.Email)
+}
+
+func (h *AuthHandler) ProfileHandler(w http.ResponseWriter, r *http.Request) {
+	// Create method context - this persists for the entire method
+	mc := h.dm.WithMethodContext(APIV1AuthLogin)
+
+	// Log HTTP request
+	mc.Info(fmt.Sprintf("HTTP request received: %s %s", r.Method, r.URL.Path))
+	mc.Debug(fmt.Sprintf("Request headers: %v", r.Header))
+
+	// Extract user ID from request
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		mc.Warn("Missing user_id in request")
+		http.Error(w, "Missing user_id", http.StatusBadRequest)
+		return
+	}
+
+	// Log profile request
+	mc.Info(fmt.Sprintf("Profile request for user: %s", userID))
+
+	// Call database service - it has its own method context
+	user, err := h.db.GetUser(userID)
+	if err != nil {
+		mc.Error("User not found")
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// Log successful profile retrieval
+	mc.Info(fmt.Sprintf("Profile retrieved successfully for user: %s", user.Email))
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"user_id": "%s", "name": "%s", "email": "%s"}`, user.ID, user.Name, user.Email)
+}
+
+// User model
 type User struct {
 	ID    string
 	Name  string
 	Email string
 }
 
-// HTTP handler with context marking
-type UserHandler struct {
-	db *DatabaseService
-	dm *debug.DebugManager
-}
-
-func NewUserHandler(db *DatabaseService, dm *debug.DebugManager) *UserHandler {
-	return &UserHandler{db: db, dm: dm}
-}
-
-func (h *UserHandler) GetUserHandler(w http.ResponseWriter, r *http.Request) {
-	// Start with request context
-	ctx := r.Context()
-
-	// Add HTTP request context - inherited by child functions
-	ctx = WithDebugFlag(ctx, debug.DebugFlag(1<<0), "http.request", h.dm)
-
-	// Log the incoming HTTP request
-	h.dm.Log(ctx, 1<<0, "Processing HTTP GET request to /users/%s", r.URL.Path)
-
-	// Extract user ID from URL (simplified)
-	userID := "123"
-
-	// Call database service (context is inherited)
-	user, err := h.db.GetUser(ctx, userID)
-	if err != nil {
-		// Log error with HTTP context
-		h.dm.Log(ctx, 1<<0, "Database error in HTTP handler: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	// Log successful response
-	h.dm.Log(ctx, 1<<1, "HTTP response: user retrieved successfully")
-
-	// Write response
-	fmt.Fprintf(w, "User: %s (%s)", user.Name, user.Email)
-}
-
-func (h *UserHandler) UpdateUserHandler(w http.ResponseWriter, r *http.Request) {
-	// Start with request context
-	ctx := r.Context()
-
-	// Add HTTP request context - inherited by child functions
-	ctx = WithDebugFlag(ctx, debug.DebugFlag(1<<0), "http.request", h.dm)
-
-	// Log the incoming HTTP request
-	h.dm.Log(ctx, 1<<0, "Processing HTTP PUT request to /users/%s", r.URL.Path)
-
-	// Extract user ID from URL (simplified)
-	userID := "123"
-
-	// Create updated user (simplified)
-	user := &User{ID: userID, Name: "Jane Doe", Email: "jane@example.com"}
-
-	// Call database service (context is inherited)
-	err := h.db.UpdateUser(ctx, user)
-	if err != nil {
-		// Log error with HTTP context
-		h.dm.Log(ctx, 1<<0, "Database error in HTTP handler: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	// Log successful response
-	h.dm.Log(ctx, 1<<1, "HTTP response: user updated successfully")
-
-	// Write response
-	fmt.Fprintf(w, "User updated: %s (%s)", user.Name, user.Email)
-}
-
 func main() {
 	// Define debug flags
 	flagDefs := []debug.FlagDefinition{
-		{Flag: 1 << 0, Name: "http.request", Path: "http.request"},
-		{Flag: 1 << 1, Name: "http.response", Path: "http.response"},
-		{Flag: 1 << 2, Name: "db.query", Path: "db.query"},
-		{Flag: 1 << 3, Name: "auth.middleware", Path: "auth.middleware"},
-		{Flag: 1 << 4, Name: "cache.redis", Path: "cache.redis"},
+		{Flag: APIV1AuthLogin, Name: "api.v1.auth.login", Path: "api.v1.auth.login"},
+		{Flag: DatabaseQuery, Name: "db.query", Path: "db.query"},
+		{Flag: HTTPRequest, Name: "http.request", Path: "http.request"},
 	}
 
 	// Create debug manager with JSON logging
@@ -162,58 +174,86 @@ func main() {
 	dm := debug.NewDebugManagerWithSlogHandler(v2parser.NewParser(), handler)
 	dm.RegisterFlags(flagDefs)
 
-	// Enable debug flags - show HTTP requests and database queries
-	dm.SetFlags("http.request|db.query")
-
-	fmt.Println("=== Context-Based Logging Example ===")
-	fmt.Println("This example shows how to use context to mark log functions")
-	fmt.Println("in HTTP handlers and database calls.")
-	fmt.Println()
-
 	// Create services
 	db := NewDatabaseService(dm)
-	userHandler := NewUserHandler(db, dm)
+	authHandler := NewAuthHandler(db, dm)
+
+	fmt.Println("=== HTTP Context Example ===")
+	fmt.Println("Demonstrates method context in HTTP handlers.")
+	fmt.Println("Each handler method has its own context that persists for the entire method.")
+	fmt.Println()
+
+	// Test 1: Enable API v1 auth login - should show HTTP and DB logs
+	fmt.Println("--- Test 1: API v1 auth login enabled ---")
+	dm.SetFlags("api.v1.auth.login")
 
 	// Simulate HTTP requests
-	fmt.Println("--- Simulating HTTP GET /users/123 ---")
-	req1, _ := http.NewRequest("GET", "/users/123", nil)
-	req1 = req1.WithContext(context.Background())
+	req1 := &http.Request{
+		Method: "POST",
+		URL:    &url.URL{Path: "/login"},
+		Header: http.Header{"User-Agent": []string{"Mozilla/5.0"}},
+	}
+	req1.URL.RawQuery = "user_id=123&password=correctpassword"
 
-	// Create a mock response writer
-	w1 := &mockResponseWriter{}
-	userHandler.GetUserHandler(w1, req1)
-
+	authHandler.LoginHandler(&mockResponseWriter{}, req1)
 	fmt.Println()
-	fmt.Println("--- Simulating HTTP PUT /users/123 ---")
-	req2, _ := http.NewRequest("PUT", "/users/123", nil)
-	req2 = req2.WithContext(context.Background())
 
-	w2 := &mockResponseWriter{}
-	userHandler.UpdateUserHandler(w2, req2)
+	// Test 2: Enable database queries - should show DB logs only
+	fmt.Println("--- Test 2: Database queries enabled ---")
+	dm.SetFlags("db.query")
 
+	req2 := &http.Request{
+		Method: "GET",
+		URL:    &url.URL{Path: "/profile"},
+		Header: http.Header{"User-Agent": []string{"Mozilla/5.0"}},
+	}
+	req2.URL.RawQuery = "user_id=123"
+
+	authHandler.ProfileHandler(&mockResponseWriter{}, req2)
 	fmt.Println()
-	fmt.Println("=== Context Marking Benefits ===")
-	fmt.Println("1. Context is set at function entry points")
-	fmt.Println("2. Context flows through the call stack")
-	fmt.Println("3. Each function can add its own debug flags")
-	fmt.Println("4. Logs are automatically tagged with the right context")
-	fmt.Println("5. Easy to enable/disable logging for specific components")
+
+	// Test 3: Enable both - should show all logs
+	fmt.Println("--- Test 3: Both API and database enabled ---")
+	dm.SetFlags("api.v1.auth.login|db.query")
+
+	req3 := &http.Request{
+		Method: "POST",
+		URL:    &url.URL{Path: "/login"},
+		Header: http.Header{"User-Agent": []string{"Mozilla/5.0"}},
+	}
+	req3.URL.RawQuery = "user_id=123&password=correctpassword"
+
+	authHandler.LoginHandler(&mockResponseWriter{}, req3)
+	fmt.Println()
+
+	fmt.Println("=== HTTP Context Benefits ===")
+	fmt.Println("1. Method context flags are set once at the beginning of each handler")
+	fmt.Println("2. All log calls within the handler automatically use the method context")
+	fmt.Println("3. No need to pass context or flags to every log call")
+	fmt.Println("4. Clean, readable HTTP handler code")
+	fmt.Println("5. Easy to understand what each handler logs")
+	fmt.Println("6. Perfect for HTTP handlers, middleware, etc.")
 }
 
-// Mock response writer for demonstration
+// Mock response writer for testing
 type mockResponseWriter struct {
-	body []byte
+	statusCode int
+	headers    http.Header
+	body       []byte
 }
 
-func (w *mockResponseWriter) Header() http.Header {
-	return make(http.Header)
+func (m *mockResponseWriter) Header() http.Header {
+	if m.headers == nil {
+		m.headers = make(http.Header)
+	}
+	return m.headers
 }
 
-func (w *mockResponseWriter) Write(data []byte) (int, error) {
-	w.body = append(w.body, data...)
+func (m *mockResponseWriter) Write(data []byte) (int, error) {
+	m.body = append(m.body, data...)
 	return len(data), nil
 }
 
-func (w *mockResponseWriter) WriteHeader(statusCode int) {
-	// Mock implementation
+func (m *mockResponseWriter) WriteHeader(statusCode int) {
+	m.statusCode = statusCode
 }
