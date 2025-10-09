@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,197 +10,172 @@ import (
 	v2parser "github.com/SCKelemen/debug/v2/parser"
 )
 
-// WithDebugFlag adds a debug flag to the context (immutable, like standard Go context)
-func WithDebugFlag(ctx context.Context, flag debug.DebugFlag, description string, dm *debug.DebugManager) context.Context {
-	// Get existing flags from context
-	existingFlags := debug.GetDebugFlagsFromContext(ctx)
-	
-	// Combine with new flag
-	combinedFlags := existingFlags | flag
-	
-	// Create new context with combined flags
-	newCtx := debug.WithDebugFlags(ctx, combinedFlags)
-	
-	return newCtx
-}
+// Static context flags - set at compile time
+const (
+	APIV1AuthLogin = debug.DebugFlag(1 << 0) // api.v1.auth.login
+	DatabaseQuery  = debug.DebugFlag(1 << 2) // db.query
+	CacheRedis     = debug.DebugFlag(1 << 3) // cache.redis
+)
 
 // FunctionContext represents a function's debug context
 type FunctionContext struct {
-	dm   *debug.DebugManager
-	flag debug.DebugFlag
+	mc   *debug.MethodContext
 	name string
 }
 
-// WithFunctionContext creates a new context with function marking
-func WithFunctionContext(ctx context.Context, dm *debug.DebugManager, flag debug.DebugFlag, functionName string) (context.Context, *FunctionContext) {
-	// Add function flag to context - inherits parent context
-	newCtx := WithDebugFlag(ctx, flag, functionName, dm)
+// WithFunctionContext creates a new method context with function marking
+func WithFunctionContext(dm *debug.DebugManager, flag debug.DebugFlag, functionName string) *FunctionContext {
+	// Create method context
+	mc := dm.WithMethodContext(flag)
 
 	// Log function entry
-	dm.Log(newCtx, flag, "Function entry: %s", functionName)
+	mc.Info(fmt.Sprintf("Function entry: %s", functionName))
 
-	return newCtx, &FunctionContext{
-		dm:   dm,
-		flag: flag,
+	return &FunctionContext{
+		mc:   mc,
 		name: functionName,
 	}
 }
 
 // Cleanup logs function exit and can be used with defer
 func (fc *FunctionContext) Cleanup() {
-	fc.dm.Log(context.Background(), fc.flag, "Function exit: %s", fc.name)
+	fc.mc.Info(fmt.Sprintf("Function exit: %s", fc.name))
 }
 
-// CleanupWithError logs function exit with error
-func (fc *FunctionContext) CleanupWithError(err error) {
-	if err != nil {
-		fc.dm.Log(context.Background(), fc.flag, "Function exit with error: %s - %v", fc.name, err)
-	} else {
-		fc.dm.Log(context.Background(), fc.flag, "Function exit: %s", fc.name)
+// Log logs a message using the function context
+func (fc *FunctionContext) Log(level string, message string, args ...interface{}) {
+	switch level {
+	case "debug":
+		fc.mc.Debug(fmt.Sprintf(message, args...))
+	case "info":
+		fc.mc.Info(fmt.Sprintf(message, args...))
+	case "warn":
+		fc.mc.Warn(fmt.Sprintf(message, args...))
+	case "error":
+		fc.mc.Error(fmt.Sprintf(message, args...))
+	default:
+		fc.mc.Info(fmt.Sprintf(message, args...))
 	}
 }
 
-// Business logic functions with context marking
-func ProcessUserRegistration(ctx context.Context, dm *debug.DebugManager, userData map[string]string) error {
-	// Mark this function in context
-	ctx, fc := WithFunctionContext(ctx, dm, debug.DebugFlag(1<<5), "ProcessUserRegistration")
+// Mock database service
+type DatabaseService struct {
+	dm *debug.DebugManager
+}
+
+func NewDatabaseService(dm *debug.DebugManager) *DatabaseService {
+	return &DatabaseService{dm: dm}
+}
+
+func (db *DatabaseService) GetUser(userID string) (*User, error) {
+	// Create function context - this persists for the entire function
+	fc := WithFunctionContext(db.dm, DatabaseQuery, "GetUser")
 	defer fc.Cleanup()
 
-	// Log function start
-	dm.Log(ctx, 1<<5, "Starting user registration process")
+	// Log the database query
+	fc.Log("debug", "Executing database query: SELECT * FROM users WHERE id = %s", userID)
 
-	// Validate user data
-	if err := ValidateUserData(ctx, dm, userData); err != nil {
-		fc.CleanupWithError(err)
-		return err
-	}
+	// Simulate database work
+	time.Sleep(10 * time.Millisecond)
 
-	// Create user account
-	if err := CreateUserAccount(ctx, dm, userData); err != nil {
-		fc.CleanupWithError(err)
-		return err
-	}
+	// Log query completion
+	fc.Log("info", "Database query completed for user: %s", userID)
 
-	// Send welcome email
-	if err := SendWelcomeEmail(ctx, dm, userData["email"]); err != nil {
-		fc.CleanupWithError(err)
-		return err
-	}
-
-	// Log successful completion
-	dm.Log(ctx, 1<<5, "User registration completed successfully")
-	return nil
+	return &User{ID: userID, Name: "John Doe", Email: "john@example.com"}, nil
 }
 
-func ValidateUserData(ctx context.Context, dm *debug.DebugManager, userData map[string]string) error {
-	// Mark this function in context
-	ctx, fc := WithFunctionContext(ctx, dm, debug.DebugFlag(1<<6), "ValidateUserData")
+func (db *DatabaseService) ValidatePassword(userID, password string) bool {
+	// Create function context - this persists for the entire function
+	fc := WithFunctionContext(db.dm, DatabaseQuery, "ValidatePassword")
 	defer fc.Cleanup()
 
-	// Log validation start
-	dm.Log(ctx, 1<<6, "Starting user data validation")
-
-	// Check required fields
-	requiredFields := []string{"email", "name", "password"}
-	for _, field := range requiredFields {
-		if userData[field] == "" {
-			err := fmt.Errorf("missing required field: %s", field)
-			fc.CleanupWithError(err)
-			return err
-		}
-		dm.Log(ctx, 1<<6, "Validated field: %s", field)
-	}
+	// Log password validation
+	fc.Log("debug", "Validating password for user: %s", userID)
 
 	// Simulate validation work
 	time.Sleep(5 * time.Millisecond)
 
-	// Log validation success
-	dm.Log(ctx, 1<<6, "User data validation completed successfully")
-	return nil
+	// Log validation result
+	fc.Log("info", "Password validation completed for user: %s", userID)
+
+	return password == "correctpassword"
 }
 
-func CreateUserAccount(ctx context.Context, dm *debug.DebugManager, userData map[string]string) error {
-	// Mark this function in context
-	ctx, fc := WithFunctionContext(ctx, dm, debug.DebugFlag(1<<7), "CreateUserAccount")
+func (db *DatabaseService) GetUserFromCache(userID string) (*User, error) {
+	// Create function context - this persists for the entire function
+	fc := WithFunctionContext(db.dm, CacheRedis, "GetUserFromCache")
 	defer fc.Cleanup()
 
-	// Log account creation start
-	dm.Log(ctx, 1<<7, "Starting user account creation")
+	// Log cache lookup
+	fc.Log("debug", "Looking up user in cache: %s", userID)
 
-	// Hash password
-	if err := HashPassword(ctx, dm, userData["password"]); err != nil {
-		fc.CleanupWithError(err)
-		return err
+	// Simulate cache work
+	time.Sleep(2 * time.Millisecond)
+
+	// Log cache result
+	fc.Log("info", "Cache lookup completed for user: %s", userID)
+
+	return &User{ID: userID, Name: "John Doe", Email: "john@example.com"}, nil
+}
+
+// Auth handler with function context
+type AuthHandler struct {
+	db *DatabaseService
+	dm *debug.DebugManager
+}
+
+func NewAuthHandler(db *DatabaseService, dm *debug.DebugManager) *AuthHandler {
+	return &AuthHandler{db: db, dm: dm}
+}
+
+func (h *AuthHandler) Login(userID, password string) error {
+	// Create function context - this persists for the entire function
+	fc := WithFunctionContext(h.dm, APIV1AuthLogin, "Login")
+	defer fc.Cleanup()
+
+	// Log login request
+	fc.Log("info", "Login request received for user: %s", userID)
+
+	// Try cache first
+	user, err := h.db.GetUserFromCache(userID)
+	if err != nil {
+		fc.Log("warn", "Cache miss for user: %s, falling back to database", userID)
+		
+		// Fall back to database
+		user, err = h.db.GetUser(userID)
+		if err != nil {
+			fc.Log("error", "User not found: %s", userID)
+			return err
+		}
+	} else {
+		fc.Log("info", "Cache hit for user: %s", userID)
 	}
 
-	// Save to database
-	if err := SaveUserToDatabase(ctx, dm, userData); err != nil {
-		fc.CleanupWithError(err)
-		return err
+	// Validate password
+	if !h.db.ValidatePassword(userID, password) {
+		fc.Log("error", "Invalid password for user: %s", userID)
+		return fmt.Errorf("invalid password")
 	}
 
-	// Log account creation success
-	dm.Log(ctx, 1<<7, "User account created successfully")
+	// Log successful login
+	fc.Log("info", "Login successful for user: %s", user.Email)
+
 	return nil
 }
 
-func HashPassword(ctx context.Context, dm *debug.DebugManager, password string) error {
-	// Mark this function in context
-	ctx, fc := WithFunctionContext(ctx, dm, debug.DebugFlag(1<<8), "HashPassword")
-	defer fc.Cleanup()
-
-	// Log password hashing
-	dm.Log(ctx, 1<<8, "Hashing password (length: %d)", len(password))
-
-	// Simulate password hashing
-	time.Sleep(10 * time.Millisecond)
-
-	// Log hashing completion
-	dm.Log(ctx, 1<<8, "Password hashed successfully")
-	return nil
-}
-
-func SaveUserToDatabase(ctx context.Context, dm *debug.DebugManager, userData map[string]string) error {
-	// Mark this function in context
-	ctx, fc := WithFunctionContext(ctx, dm, debug.DebugFlag(1<<9), "SaveUserToDatabase")
-	defer fc.Cleanup()
-
-	// Log database save
-	dm.Log(ctx, 1<<9, "Saving user to database: %s", userData["email"])
-
-	// Simulate database save
-	time.Sleep(15 * time.Millisecond)
-
-	// Log save completion
-	dm.Log(ctx, 1<<9, "User saved to database successfully")
-	return nil
-}
-
-func SendWelcomeEmail(ctx context.Context, dm *debug.DebugManager, email string) error {
-	// Mark this function in context
-	ctx, fc := WithFunctionContext(ctx, dm, debug.DebugFlag(1<<10), "SendWelcomeEmail")
-	defer fc.Cleanup()
-
-	// Log email sending
-	dm.Log(ctx, 1<<10, "Sending welcome email to: %s", email)
-
-	// Simulate email sending
-	time.Sleep(20 * time.Millisecond)
-
-	// Log email sent
-	dm.Log(ctx, 1<<10, "Welcome email sent successfully")
-	return nil
+// User model
+type User struct {
+	ID    string
+	Name  string
+	Email string
 }
 
 func main() {
 	// Define debug flags
 	flagDefs := []debug.FlagDefinition{
-		{Flag: 1 << 5, Name: "user.registration", Path: "user.registration"},
-		{Flag: 1 << 6, Name: "user.validation", Path: "user.validation"},
-		{Flag: 1 << 7, Name: "user.account", Path: "user.account"},
-		{Flag: 1 << 8, Name: "user.password", Path: "user.password"},
-		{Flag: 1 << 9, Name: "user.database", Path: "user.database"},
-		{Flag: 1 << 10, Name: "user.email", Path: "user.email"},
+		{Flag: APIV1AuthLogin, Name: "api.v1.auth.login", Path: "api.v1.auth.login"},
+		{Flag: DatabaseQuery, Name: "db.query", Path: "db.query"},
+		{Flag: CacheRedis, Name: "cache.redis", Path: "cache.redis"},
 	}
 
 	// Create debug manager with JSON logging
@@ -211,47 +185,55 @@ func main() {
 	dm := debug.NewDebugManagerWithSlogHandler(v2parser.NewParser(), handler)
 	dm.RegisterFlags(flagDefs)
 
-	// Enable debug flags - show all user-related functions
-	dm.SetFlags("user.*")
+	// Create services
+	db := NewDatabaseService(dm)
+	authHandler := NewAuthHandler(db, dm)
 
-	fmt.Println("=== Function-Level Context Marking Example ===")
-	fmt.Println("This example shows how to mark functions in context")
-	fmt.Println("with automatic entry/exit logging and cleanup.")
+	fmt.Println("=== Context Functions Example ===")
+	fmt.Println("Demonstrates function context with automatic entry/exit logging.")
+	fmt.Println("Each function has its own context that persists for the entire function.")
+	fmt.Println("Uses defer for automatic cleanup and exit logging.")
 	fmt.Println()
 
-	// Test successful user registration
-	fmt.Println("--- Successful User Registration ---")
-	userData := map[string]string{
-		"email":    "john@example.com",
-		"name":     "John Doe",
-		"password": "securepassword123",
-	}
+	// Test 1: Enable API v1 auth login - should show function entry/exit
+	fmt.Println("--- Test 1: API v1 auth login enabled ---")
+	dm.SetFlags("api.v1.auth.login")
 
-	ctx := context.Background()
-	if err := ProcessUserRegistration(ctx, dm, userData); err != nil {
-		fmt.Printf("Registration failed: %v\n", err)
-	} else {
-		fmt.Println("Registration completed successfully!")
-	}
-
+	authHandler.Login("123", "correctpassword")
 	fmt.Println()
-	fmt.Println("--- Failed User Registration (missing email) ---")
-	invalidUserData := map[string]string{
-		"name":     "Jane Doe",
-		"password": "securepassword123",
-		// Missing email
-	}
 
-	if err := ProcessUserRegistration(ctx, dm, invalidUserData); err != nil {
-		fmt.Printf("Registration failed as expected: %v\n", err)
-	}
+	// Test 2: Enable database queries - should show DB function entry/exit
+	fmt.Println("--- Test 2: Database queries enabled ---")
+	dm.SetFlags("db.query")
 
+	db.GetUser("123")
+	db.ValidatePassword("123", "correctpassword")
 	fmt.Println()
-	fmt.Println("=== Function Context Benefits ===")
-	fmt.Println("1. Automatic function entry/exit logging")
-	fmt.Println("2. Context flows through function calls")
-	fmt.Println("3. Easy cleanup with defer statements")
-	fmt.Println("4. Error handling with context")
-	fmt.Println("5. Hierarchical function tracing")
-	fmt.Println("6. Each function can have its own debug flag")
+
+	// Test 3: Enable cache operations - should show cache function entry/exit
+	fmt.Println("--- Test 3: Cache operations enabled ---")
+	dm.SetFlags("cache.redis")
+
+	db.GetUserFromCache("123")
+	fmt.Println()
+
+	// Test 4: Enable all - should show all function entry/exit
+	fmt.Println("--- Test 4: All flags enabled ---")
+	dm.SetFlags("api.v1.auth.login|db.query|cache.redis")
+
+	authHandler.Login("123", "correctpassword")
+	fmt.Println()
+
+	fmt.Println("=== Context Functions Benefits ===")
+	fmt.Println("1. Function context flags are set once at the beginning of each function")
+	fmt.Println("2. All log calls within the function automatically use the function context")
+	fmt.Println("3. Automatic function entry/exit logging with defer")
+	fmt.Println("4. Clean, readable code with consistent logging")
+	fmt.Println("5. Easy to understand what each function logs")
+	fmt.Println("6. Perfect for service methods, utility functions, etc.")
+	fmt.Println()
+	fmt.Println("Usage pattern:")
+	fmt.Println("  fc := WithFunctionContext(dm, flag, \"FunctionName\")")
+	fmt.Println("  defer fc.Cleanup()")
+	fmt.Println("  fc.Log(\"info\", \"message\")")
 }

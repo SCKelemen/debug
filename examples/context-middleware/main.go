@@ -1,10 +1,10 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -12,118 +12,39 @@ import (
 	v2parser "github.com/SCKelemen/debug/v2/parser"
 )
 
-// WithDebugFlag adds a debug flag to the context (immutable, like standard Go context)
-func WithDebugFlag(ctx context.Context, flag debug.DebugFlag, description string, dm *debug.DebugManager) context.Context {
-	// Get existing flags from context
-	existingFlags := debug.GetDebugFlagsFromContext(ctx)
+// Static context flags - set at compile time
+const (
+	APIV1AuthLogin = debug.DebugFlag(1 << 0) // api.v1.auth.login
+	DatabaseQuery  = debug.DebugFlag(1 << 2) // db.query
+	HTTPRequest    = debug.DebugFlag(1 << 3) // http.request
+)
 
-	// Combine with new flag
-	combinedFlags := existingFlags | flag
+// Middleware for adding debug context to HTTP requests
+func DebugMiddleware(dm *debug.DebugManager, flag debug.DebugFlag, handlerName string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Create method context for this middleware
+			mc := dm.WithMethodContext(flag)
 
-	// Create new context with combined flags
-	newCtx := debug.WithDebugFlags(ctx, combinedFlags)
+			// Log middleware entry
+			mc.Info(fmt.Sprintf("Middleware entry: %s", handlerName))
+			mc.Debug(fmt.Sprintf("Request: %s %s", r.Method, r.URL.Path))
+			mc.Debug(fmt.Sprintf("Remote address: %s", r.RemoteAddr))
 
-	return newCtx
-}
+			// Record start time
+			start := time.Now()
 
-// Authentication middleware with context marking
-func AuthMiddleware(dm *debug.DebugManager, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Add authentication middleware context - inherited by child handlers
-		ctx := WithDebugFlag(r.Context(), debug.DebugFlag(1<<3), "auth.middleware", dm)
+			// Call next handler
+			next.ServeHTTP(w, r)
 
-		// Log authentication attempt
-		dm.Log(ctx, 1<<3, "Authentication middleware: processing request for %s", r.URL.Path)
-
-		// Simulate authentication check
-		time.Sleep(5 * time.Millisecond)
-
-		// Check for auth token (simplified)
-		authToken := r.Header.Get("Authorization")
-		if authToken == "" {
-			dm.Log(ctx, 1<<3, "Authentication failed: no token provided")
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		// Log successful authentication
-		dm.Log(ctx, 1<<3, "Authentication successful for token: %s", authToken[:10]+"...")
-
-		// Pass context to next handler
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-// Logging middleware with context marking
-func LoggingMiddleware(dm *debug.DebugManager, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Add HTTP request context - inherited by child handlers
-		ctx := WithDebugFlag(r.Context(), debug.DebugFlag(1<<0), "http.request", dm)
-
-		// Log request start
-		start := time.Now()
-		dm.Log(ctx, 1<<0, "HTTP request started: %s %s", r.Method, r.URL.Path)
-
-		// Create response wrapper to capture status
-		wrapper := &responseWrapper{ResponseWriter: w, statusCode: 200}
-
-		// Call next handler
-		next.ServeHTTP(wrapper, r.WithContext(ctx))
-
-		// Log request completion
-		duration := time.Since(start)
-		dm.Log(ctx, 1<<1, "HTTP request completed: %s %s - Status: %d - Duration: %v",
-			r.Method, r.URL.Path, wrapper.statusCode, duration)
-	})
-}
-
-// Cache service with context marking
-type CacheService struct {
-	dm *debug.DebugManager
-}
-
-func NewCacheService(dm *debug.DebugManager) *CacheService {
-	return &CacheService{dm: dm}
-}
-
-func (c *CacheService) Get(ctx context.Context, key string) (string, bool) {
-	// Add cache context - inherits parent context
-	ctx = WithDebugFlag(ctx, debug.DebugFlag(1<<4), "cache.redis", c.dm)
-
-	// Log cache lookup
-	c.dm.Log(ctx, 1<<4, "Cache lookup: key=%s", key)
-
-	// Simulate cache check
-	time.Sleep(2 * time.Millisecond)
-
-	// Mock cache hit
-	if key == "user:123" {
-		c.dm.Log(ctx, 1<<4, "Cache hit: key=%s, value=user_data", key)
-		return "user_data", true
+			// Log middleware exit
+			duration := time.Since(start)
+			mc.Info(fmt.Sprintf("Middleware exit: %s (took %v)", handlerName, duration))
+		})
 	}
-
-	// Mock cache miss
-	c.dm.Log(ctx, 1<<4, "Cache miss: key=%s", key)
-	return "", false
 }
 
-func (c *CacheService) Set(ctx context.Context, key, value string) error {
-	// Add cache context - inherits parent context
-	ctx = WithDebugFlag(ctx, debug.DebugFlag(1<<4), "cache.redis", c.dm)
-
-	// Log cache set
-	c.dm.Log(ctx, 1<<4, "Cache set: key=%s, value=%s", key, value)
-
-	// Simulate cache write
-	time.Sleep(3 * time.Millisecond)
-
-	// Log cache set completion
-	c.dm.Log(ctx, 1<<4, "Cache set completed: key=%s", key)
-
-	return nil
-}
-
-// Database service with context marking
+// Mock database service
 type DatabaseService struct {
 	dm *debug.DebugManager
 }
@@ -132,20 +53,125 @@ func NewDatabaseService(dm *debug.DebugManager) *DatabaseService {
 	return &DatabaseService{dm: dm}
 }
 
-func (db *DatabaseService) GetUser(ctx context.Context, userID string) (*User, error) {
-	// Add database context - inherits parent context
-	ctx = WithDebugFlag(ctx, debug.DebugFlag(1<<2), "db.query", db.dm)
+func (db *DatabaseService) GetUser(userID string) (*User, error) {
+	// Create method context - this persists for the entire method
+	mc := db.dm.WithMethodContext(DatabaseQuery)
 
-	// Log database query
-	db.dm.Log(ctx, 1<<2, "Database query: SELECT * FROM users WHERE id = %s", userID)
+	// Log the database query
+	mc.Debug(fmt.Sprintf("Executing database query: SELECT * FROM users WHERE id = %s", userID))
 
 	// Simulate database work
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// Log query completion
-	db.dm.Log(ctx, 1<<2, "Database query completed: user found")
+	mc.Info(fmt.Sprintf("Database query completed for user: %s", userID))
 
 	return &User{ID: userID, Name: "John Doe", Email: "john@example.com"}, nil
+}
+
+func (db *DatabaseService) ValidatePassword(userID, password string) bool {
+	// Create method context - this persists for the entire method
+	mc := db.dm.WithMethodContext(DatabaseQuery)
+
+	// Log password validation
+	mc.Debug(fmt.Sprintf("Validating password for user: %s", userID))
+
+	// Simulate validation work
+	time.Sleep(5 * time.Millisecond)
+
+	// Log validation result
+	mc.Info(fmt.Sprintf("Password validation completed for user: %s", userID))
+
+	return password == "correctpassword"
+}
+
+// HTTP handlers with method context
+type AuthHandler struct {
+	db *DatabaseService
+	dm *debug.DebugManager
+}
+
+func NewAuthHandler(db *DatabaseService, dm *debug.DebugManager) *AuthHandler {
+	return &AuthHandler{db: db, dm: dm}
+}
+
+func (h *AuthHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
+	// Create method context - this persists for the entire method
+	mc := h.dm.WithMethodContext(APIV1AuthLogin)
+
+	// Log HTTP request
+	mc.Info(fmt.Sprintf("Login handler called: %s %s", r.Method, r.URL.Path))
+
+	// Extract user credentials from request
+	userID := r.URL.Query().Get("user_id")
+	password := r.URL.Query().Get("password")
+
+	if userID == "" || password == "" {
+		mc.Warn("Missing user credentials in request")
+		http.Error(w, "Missing user credentials", http.StatusBadRequest)
+		return
+	}
+
+	// Log authentication attempt
+	mc.Info(fmt.Sprintf("Authentication attempt for user: %s", userID))
+
+	// Call database service - it has its own method context
+	user, err := h.db.GetUser(userID)
+	if err != nil {
+		mc.Error("User not found")
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// Validate password
+	if !h.db.ValidatePassword(userID, password) {
+		mc.Error("Invalid password")
+		http.Error(w, "Invalid password", http.StatusUnauthorized)
+		return
+	}
+
+	// Log successful authentication
+	mc.Info(fmt.Sprintf("Authentication successful for user: %s", user.Email))
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"status": "success", "user_id": "%s", "email": "%s"}`, user.ID, user.Email)
+}
+
+func (h *AuthHandler) ProfileHandler(w http.ResponseWriter, r *http.Request) {
+	// Create method context - this persists for the entire method
+	mc := h.dm.WithMethodContext(APIV1AuthLogin)
+
+	// Log HTTP request
+	mc.Info(fmt.Sprintf("Profile handler called: %s %s", r.Method, r.URL.Path))
+
+	// Extract user ID from request
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		mc.Warn("Missing user_id in request")
+		http.Error(w, "Missing user_id", http.StatusBadRequest)
+		return
+	}
+
+	// Log profile request
+	mc.Info(fmt.Sprintf("Profile request for user: %s", userID))
+
+	// Call database service - it has its own method context
+	user, err := h.db.GetUser(userID)
+	if err != nil {
+		mc.Error("User not found")
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// Log successful profile retrieval
+	mc.Info(fmt.Sprintf("Profile retrieved successfully for user: %s", user.Email))
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"user_id": "%s", "name": "%s", "email": "%s"}`, user.ID, user.Name, user.Email)
 }
 
 // User model
@@ -155,70 +181,12 @@ type User struct {
 	Email string
 }
 
-// Main handler with context flow
-type UserHandler struct {
-	cache *CacheService
-	db    *DatabaseService
-	dm    *debug.DebugManager
-}
-
-func NewUserHandler(cache *CacheService, db *DatabaseService, dm *debug.DebugManager) *UserHandler {
-	return &UserHandler{cache: cache, db: db, dm: dm}
-}
-
-func (h *UserHandler) GetUserHandler(w http.ResponseWriter, r *http.Request) {
-	// Context already has auth and http flags from middleware
-	ctx := r.Context()
-
-	// Log handler entry
-	h.dm.Log(ctx, 1<<0, "User handler: processing GET request")
-
-	userID := "123"
-
-	// Try cache first - inherits middleware context
-	cacheKey := fmt.Sprintf("user:%s", userID)
-	if cached, found := h.cache.Get(ctx, cacheKey); found {
-		// Log cache hit
-		h.dm.Log(ctx, 1<<0, "User handler: returning cached data")
-		fmt.Fprintf(w, "Cached User: %s", cached)
-		return
-	}
-
-	// Cache miss - get from database - inherits middleware context
-	user, err := h.db.GetUser(ctx, userID)
-	if err != nil {
-		h.dm.Log(ctx, 1<<0, "User handler: database error: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	// Cache the result - inherits middleware context
-	h.cache.Set(ctx, cacheKey, fmt.Sprintf("%s (%s)", user.Name, user.Email))
-
-	// Log successful response
-	h.dm.Log(ctx, 1<<0, "User handler: returning fresh data from database")
-	fmt.Fprintf(w, "User: %s (%s)", user.Name, user.Email)
-}
-
-// Response wrapper to capture status code
-type responseWrapper struct {
-	http.ResponseWriter
-	statusCode int
-}
-
-func (rw *responseWrapper) WriteHeader(code int) {
-	rw.statusCode = code
-	rw.ResponseWriter.WriteHeader(code)
-}
-
 func main() {
 	// Define debug flags
 	flagDefs := []debug.FlagDefinition{
-		{Flag: 1 << 0, Name: "http.request", Path: "http.request"},
-		{Flag: 1 << 1, Name: "http.response", Path: "http.response"},
-		{Flag: 1 << 2, Name: "db.query", Path: "db.query"},
-		{Flag: 1 << 3, Name: "auth.middleware", Path: "auth.middleware"},
-		{Flag: 1 << 4, Name: "cache.redis", Path: "cache.redis"},
+		{Flag: APIV1AuthLogin, Name: "api.v1.auth.login", Path: "api.v1.auth.login"},
+		{Flag: DatabaseQuery, Name: "db.query", Path: "db.query"},
+		{Flag: HTTPRequest, Name: "http.request", Path: "http.request"},
 	}
 
 	// Create debug manager with JSON logging
@@ -228,67 +196,98 @@ func main() {
 	dm := debug.NewDebugManagerWithSlogHandler(v2parser.NewParser(), handler)
 	dm.RegisterFlags(flagDefs)
 
-	// Enable debug flags - show all components
-	dm.SetFlags("http.request|http.response|db.query|auth.middleware|cache.redis")
-
-	fmt.Println("=== Context-Based Middleware Example ===")
-	fmt.Println("This example shows how context flows through middleware")
-	fmt.Println("and how each component can mark itself in the context.")
-	fmt.Println()
-
 	// Create services
-	cache := NewCacheService(dm)
 	db := NewDatabaseService(dm)
-	userHandler := NewUserHandler(cache, db, dm)
+	authHandler := NewAuthHandler(db, dm)
 
-	// Create middleware chain
-	mux := http.NewServeMux()
-	mux.HandleFunc("/users/", userHandler.GetUserHandler)
-
-	// Apply middleware (order matters - outer middleware runs first)
-	handlerWithAuth := AuthMiddleware(dm, mux)
-	handlerWithLogging := LoggingMiddleware(dm, handlerWithAuth)
-
-	// Simulate HTTP request with authentication
-	fmt.Println("--- Simulating HTTP GET /users/123 with auth ---")
-	req, _ := http.NewRequest("GET", "/users/123", nil)
-	req.Header.Set("Authorization", "Bearer token123")
-	req = req.WithContext(context.Background())
-
-	w := &mockResponseWriter{}
-	handlerWithLogging.ServeHTTP(w, req)
-
+	fmt.Println("=== Context Middleware Example ===")
+	fmt.Println("Demonstrates middleware with method context.")
+	fmt.Println("Each middleware and handler has its own context that persists for the entire method.")
 	fmt.Println()
-	fmt.Println("--- Simulating HTTP GET /users/123 without auth ---")
-	req2, _ := http.NewRequest("GET", "/users/123", nil)
-	req2 = req2.WithContext(context.Background())
 
-	w2 := &mockResponseWriter{}
-	handlerWithLogging.ServeHTTP(w2, req2)
+	// Test 1: Enable API v1 auth login - should show handler and DB logs
+	fmt.Println("--- Test 1: API v1 auth login enabled ---")
+	dm.SetFlags("api.v1.auth.login")
 
+	// Simulate HTTP requests
+	req1 := &http.Request{
+		Method: "POST",
+		URL:    &url.URL{Path: "/login"},
+		Header: http.Header{"User-Agent": []string{"Mozilla/5.0"}},
+	}
+	req1.URL.RawQuery = "user_id=123&password=correctpassword"
+
+	authHandler.LoginHandler(&mockResponseWriter{}, req1)
 	fmt.Println()
-	fmt.Println("=== Context Flow Benefits ===")
-	fmt.Println("1. Middleware adds context at the entry point")
-	fmt.Println("2. Context flows through the entire request lifecycle")
-	fmt.Println("3. Each service can add its own debug flags")
-	fmt.Println("4. Logs show the complete request flow")
-	fmt.Println("5. Easy to trace requests through multiple layers")
+
+	// Test 2: Enable database queries - should show DB logs only
+	fmt.Println("--- Test 2: Database queries enabled ---")
+	dm.SetFlags("db.query")
+
+	req2 := &http.Request{
+		Method: "GET",
+		URL:    &url.URL{Path: "/profile"},
+		Header: http.Header{"User-Agent": []string{"Mozilla/5.0"}},
+	}
+	req2.URL.RawQuery = "user_id=123"
+
+	authHandler.ProfileHandler(&mockResponseWriter{}, req2)
+	fmt.Println()
+
+	// Test 3: Enable both - should show all logs
+	fmt.Println("--- Test 3: Both API and database enabled ---")
+	dm.SetFlags("api.v1.auth.login|db.query")
+
+	req3 := &http.Request{
+		Method: "POST",
+		URL:    &url.URL{Path: "/login"},
+		Header: http.Header{"User-Agent": []string{"Mozilla/5.0"}},
+	}
+	req3.URL.RawQuery = "user_id=123&password=correctpassword"
+
+	authHandler.LoginHandler(&mockResponseWriter{}, req3)
+	fmt.Println()
+
+	fmt.Println("=== Context Middleware Benefits ===")
+	fmt.Println("1. Method context flags are set once at the beginning of each middleware/handler")
+	fmt.Println("2. All log calls within the middleware/handler automatically use the method context")
+	fmt.Println("3. No need to pass context or flags to every log call")
+	fmt.Println("4. Clean, readable middleware and handler code")
+	fmt.Println("5. Easy to understand what each middleware/handler logs")
+	fmt.Println("6. Perfect for HTTP middleware, handlers, etc.")
+	fmt.Println()
+	fmt.Println("Usage pattern:")
+	fmt.Println("  func Middleware(dm *debug.DebugManager, flag debug.DebugFlag) func(http.Handler) http.Handler {")
+	fmt.Println("    return func(next http.Handler) http.Handler {")
+	fmt.Println("      return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {")
+	fmt.Println("        mc := dm.WithMethodContext(flag)")
+	fmt.Println("        mc.Info(\"Middleware entry\")")
+	fmt.Println("        next.ServeHTTP(w, r)")
+	fmt.Println("        mc.Info(\"Middleware exit\")")
+	fmt.Println("      })")
+	fmt.Println("    }")
+	fmt.Println("  }")
 }
 
-// Mock response writer for demonstration
+// Mock response writer for testing
 type mockResponseWriter struct {
-	body []byte
+	statusCode int
+	headers    http.Header
+	body       []byte
 }
 
-func (w *mockResponseWriter) Header() http.Header {
-	return make(http.Header)
+func (m *mockResponseWriter) Header() http.Header {
+	if m.headers == nil {
+		m.headers = make(http.Header)
+	}
+	return m.headers
 }
 
-func (w *mockResponseWriter) Write(data []byte) (int, error) {
-	w.body = append(w.body, data...)
+func (m *mockResponseWriter) Write(data []byte) (int, error) {
+	m.body = append(m.body, data...)
 	return len(data), nil
 }
 
-func (w *mockResponseWriter) WriteHeader(statusCode int) {
-	// Mock implementation
+func (m *mockResponseWriter) WriteHeader(statusCode int) {
+	m.statusCode = statusCode
 }
