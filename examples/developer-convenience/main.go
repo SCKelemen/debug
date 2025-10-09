@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,80 +15,76 @@ const (
 	DatabaseQuery  = debug.DebugFlag(1 << 4) // db.query
 )
 
-// WITHOUT context - you have to specify flags on every line
+// WITHOUT method context - you have to specify flags on every line
 type DatabaseServiceWithoutContext struct {
 	dm *debug.DebugManager
 }
 
-func (db *DatabaseServiceWithoutContext) GetUser(ctx context.Context, userID string) (*User, error) {
+func (db *DatabaseServiceWithoutContext) GetUser(userID string) (*User, error) {
 	// You have to specify DatabaseQuery on every single log call
-	db.dm.Log(ctx, DatabaseQuery, "Executing database query: SELECT * FROM users WHERE id = %s", userID)
-	db.dm.Log(ctx, DatabaseQuery, "Connecting to database...")
-	db.dm.Log(ctx, DatabaseQuery, "Executing query...")
-	db.dm.Log(ctx, DatabaseQuery, "Processing results...")
-	db.dm.Log(ctx, DatabaseQuery, "Closing connection...")
+	db.dm.Log(DatabaseQuery, "Executing database query: SELECT * FROM users WHERE id = %s", userID)
+	db.dm.Log(DatabaseQuery, "Connecting to database...")
+	db.dm.Log(DatabaseQuery, "Executing query...")
+	db.dm.Log(DatabaseQuery, "Processing results...")
+	db.dm.Log(DatabaseQuery, "Closing connection...")
 
 	return &User{ID: userID, Name: "John Doe", Email: "john@example.com"}, nil
 }
 
-// WITH context - set once, use everywhere
+// WITH method context - set once, use everywhere
 type DatabaseServiceWithContext struct {
 	dm *debug.DebugManager
 }
 
-func (db *DatabaseServiceWithContext) GetUser(ctx context.Context, userID string) (*User, error) {
-	// Developer convenience: set context once instead of passing flags to every log call
-	ctx = debug.WithDebugFlags(ctx, DatabaseQuery)
+func (db *DatabaseServiceWithContext) GetUser(userID string) (*User, error) {
+	// Developer convenience: create method context once instead of passing flags to every log call
+	mc := db.dm.WithMethodContext(DatabaseQuery)
 
-	// Now we can just use the context - no need to specify DatabaseQuery on every line
-	db.dm.Log(ctx, DatabaseQuery, "Executing database query: SELECT * FROM users WHERE id = %s", userID)
-	db.dm.Log(ctx, DatabaseQuery, "Connecting to database...")
-	db.dm.Log(ctx, DatabaseQuery, "Executing query...")
-	db.dm.Log(ctx, DatabaseQuery, "Processing results...")
-	db.dm.Log(ctx, DatabaseQuery, "Closing connection...")
+	// Now we can just use the method context - no need to specify DatabaseQuery on every line
+	mc.Debug(fmt.Sprintf("Executing database query: SELECT * FROM users WHERE id = %s", userID))
+	mc.Info("Connecting to database...")
+	mc.Debug("Executing query...")
+	mc.Info("Processing results...")
+	mc.Info("Closing connection...")
 
 	return &User{ID: userID, Name: "John Doe", Email: "john@example.com"}, nil
 }
 
-// Auth handler without context
+// Auth handler WITHOUT method context
 type AuthHandlerWithoutContext struct {
 	db *DatabaseServiceWithoutContext
 	dm *debug.DebugManager
 }
 
-func (h *AuthHandlerWithoutContext) Login(ctx context.Context, userID, password string) error {
+func (h *AuthHandlerWithoutContext) Login(userID, password string) error {
 	// You have to specify APIV1AuthLogin on every single log call
-	h.dm.Log(ctx, APIV1AuthLogin, "Login request received for user: %s", userID)
-	h.dm.Log(ctx, APIV1AuthLogin, "Validating user credentials...")
-	h.dm.Log(ctx, APIV1AuthLogin, "Checking user permissions...")
-	h.dm.Log(ctx, APIV1AuthLogin, "Creating session...")
-	h.dm.Log(ctx, APIV1AuthLogin, "Login successful for user: %s", userID)
+	h.dm.Log(APIV1AuthLogin, "Login request received for user: %s", userID)
+	h.dm.Log(APIV1AuthLogin, "Validating credentials...")
+	h.dm.Log(APIV1AuthLogin, "Checking permissions...")
+	h.dm.Log(APIV1AuthLogin, "Creating session...")
+	h.dm.Log(APIV1AuthLogin, "Login successful for user: %s", userID)
 
-	// Call database service
-	_, err := h.db.GetUser(ctx, userID)
-	return err
+	return nil
 }
 
-// Auth handler with context
+// Auth handler WITH method context
 type AuthHandlerWithContext struct {
 	db *DatabaseServiceWithContext
 	dm *debug.DebugManager
 }
 
-func (h *AuthHandlerWithContext) Login(ctx context.Context, userID, password string) error {
-	// Developer convenience: set context once instead of passing flags to every log call
-	ctx = debug.WithDebugFlags(ctx, APIV1AuthLogin)
+func (h *AuthHandlerWithContext) Login(userID, password string) error {
+	// Developer convenience: create method context once instead of passing flags to every log call
+	mc := h.dm.WithMethodContext(APIV1AuthLogin)
 
-	// Now we can just use the context - no need to specify APIV1AuthLogin on every line
-	h.dm.Log(ctx, APIV1AuthLogin, "Login request received for user: %s", userID)
-	h.dm.Log(ctx, APIV1AuthLogin, "Validating user credentials...")
-	h.dm.Log(ctx, APIV1AuthLogin, "Checking user permissions...")
-	h.dm.Log(ctx, APIV1AuthLogin, "Creating session...")
-	h.dm.Log(ctx, APIV1AuthLogin, "Login successful for user: %s", userID)
+	// Now we can just use the method context - no need to specify APIV1AuthLogin on every line
+	mc.Info(fmt.Sprintf("Login request received for user: %s", userID))
+	mc.Debug("Validating credentials...")
+	mc.Info("Checking permissions...")
+	mc.Info("Creating session...")
+	mc.Info(fmt.Sprintf("Login successful for user: %s", userID))
 
-	// Call database service
-	_, err := h.db.GetUser(ctx, userID)
-	return err
+	return nil
 }
 
 // User model
@@ -119,46 +114,63 @@ func main() {
 	authWithoutContext := &AuthHandlerWithoutContext{db: dbWithoutContext, dm: dm}
 	authWithContext := &AuthHandlerWithContext{db: dbWithContext, dm: dm}
 
-	fmt.Println("=== Developer Convenience: Context vs No Context ===")
-	fmt.Println("Context flags are just developer convenience to avoid writing flags on every line.")
+	fmt.Println("=== Developer Convenience Example ===")
+	fmt.Println("Comparing logging approaches: without vs with method context.")
 	fmt.Println()
 
-	ctx := context.Background()
+	// Test 1: Without method context - verbose and repetitive
+	fmt.Println("--- WITHOUT Method Context (Verbose) ---")
+	dm.SetFlags("db.query")
 
-	// Test 1: Without context - you have to specify flags on every line
-	fmt.Println("--- Test 1: WITHOUT context (verbose, repetitive) ---")
+	fmt.Println("Database operations:")
+	dbWithoutContext.GetUser("123")
+	fmt.Println()
+
+	// Test 2: With method context - clean and concise
+	fmt.Println("--- WITH Method Context (Clean) ---")
+	dm.SetFlags("db.query")
+
+	fmt.Println("Database operations:")
+	dbWithContext.GetUser("123")
+	fmt.Println()
+
+	// Test 3: Auth without method context - verbose and repetitive
+	fmt.Println("--- Auth WITHOUT Method Context (Verbose) ---")
+	dm.SetFlags("api.v1.auth.login")
+
+	fmt.Println("Authentication operations:")
+	authWithoutContext.Login("123", "password")
+	fmt.Println()
+
+	// Test 4: Auth with method context - clean and concise
+	fmt.Println("--- Auth WITH Method Context (Clean) ---")
+	dm.SetFlags("api.v1.auth.login")
+
+	fmt.Println("Authentication operations:")
+	authWithContext.Login("123", "password")
+	fmt.Println()
+
+	// Test 5: Both enabled - shows the difference clearly
+	fmt.Println("--- Both Flags Enabled (Comparison) ---")
 	dm.SetFlags("api.v1.auth.login|db.query")
 
-	authWithoutContext.Login(ctx, "123", "password")
+	fmt.Println("WITHOUT method context:")
+	authWithoutContext.Login("123", "password")
 	fmt.Println()
 
-	// Test 2: With context - set once, use everywhere
-	fmt.Println("--- Test 2: WITH context (clean, maintainable) ---")
-	dm.SetFlags("api.v1.auth.login|db.query")
-
-	authWithContext.Login(ctx, "123", "password")
+	fmt.Println("WITH method context:")
+	authWithContext.Login("123", "password")
 	fmt.Println()
 
-	fmt.Println("=== Code Comparison ===")
-	fmt.Println("WITHOUT context:")
-	fmt.Println("  h.dm.Log(ctx, APIV1AuthLogin, \"Login request received\")")
-	fmt.Println("  h.dm.Log(ctx, APIV1AuthLogin, \"Validating credentials\")")
-	fmt.Println("  h.dm.Log(ctx, APIV1AuthLogin, \"Checking permissions\")")
-	fmt.Println("  h.dm.Log(ctx, APIV1AuthLogin, \"Creating session\")")
-	fmt.Println("  h.dm.Log(ctx, APIV1AuthLogin, \"Login successful\")")
+	fmt.Println("=== Developer Convenience Benefits ===")
+	fmt.Println("1. Method context eliminates repetitive flag specification")
+	fmt.Println("2. Cleaner, more readable code")
+	fmt.Println("3. Less prone to errors (no flag typos)")
+	fmt.Println("4. Easier to maintain and refactor")
+	fmt.Println("5. Consistent logging within each method")
+	fmt.Println("6. Perfect for HTTP handlers, service methods, etc.")
 	fmt.Println()
-	fmt.Println("WITH context:")
-	fmt.Println("  ctx = debug.WithDebugFlags(ctx, APIV1AuthLogin)")
-	fmt.Println("  h.dm.Log(ctx, APIV1AuthLogin, \"Login request received\")")
-	fmt.Println("  h.dm.Log(ctx, APIV1AuthLogin, \"Validating credentials\")")
-	fmt.Println("  h.dm.Log(ctx, APIV1AuthLogin, \"Checking permissions\")")
-	fmt.Println("  h.dm.Log(ctx, APIV1AuthLogin, \"Creating session\")")
-	fmt.Println("  h.dm.Log(ctx, APIV1AuthLogin, \"Login successful\")")
-	fmt.Println()
-	fmt.Println("=== Benefits ===")
-	fmt.Println("1. Set context once instead of passing flags to every log call")
-	fmt.Println("2. Cleaner, more maintainable code")
-	fmt.Println("3. Context flags are just compile-time markers")
-	fmt.Println("4. Simple and predictable behavior")
-	fmt.Println("5. Easy to enable/disable logging for specific sections")
+	fmt.Println("Code comparison:")
+	fmt.Println("  WITHOUT: db.dm.Log(DatabaseQuery, \"message\")")
+	fmt.Println("  WITH:    mc.Info(\"message\")  // mc = dm.WithMethodContext(DatabaseQuery)")
 }

@@ -29,13 +29,13 @@ func main() {
 	// Create method contexts for different operations
 	mc1 := dm.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
 	mc1.Info("Processing HTTP request")
-	
+
 	mc2 := dm.WithMethodContext(debug.DebugFlag(1 << 1)) // http.response
 	mc2.Info("Processing HTTP response")
-	
+
 	mc3 := dm.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
 	mc3.Info("Executing database query")
-	
+
 	mc4 := dm.WithMethodContext(debug.DebugFlag(1 << 3)) // api.v1.auth.login
 	mc4.Info("API authentication")
 
@@ -52,10 +52,10 @@ func main() {
 	// Create method contexts for different operations with severity filtering
 	mc5 := dm2.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
 	mc5.Error("HTTP request error")
-	
+
 	mc6 := dm2.WithMethodContext(debug.DebugFlag(1 << 1)) // http.response
-	mc6.Info("HTTP response info") // Won't log (not ERROR)
-	
+	mc6.Info("HTTP response info")                        // Won't log (not ERROR)
+
 	mc7 := dm2.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
 	mc7.Warn("DB query warning")
 	mc7.Error("DB query error") // Will log (WARN+)
