@@ -24,7 +24,7 @@ func main() {
 
 	// Example 1: V1 Parser with traditional logging
 	fmt.Println("=== V1 Parser Example ===")
-	dm1 := debug.NewDebugManager(v1parser.NewV1Parser())
+	dm1 := debug.NewDebugManager(v1parser.NewParser())
 	dm1.RegisterFlags(flagDefs)
 	dm1.SetFlags("http.*,db.query")
 

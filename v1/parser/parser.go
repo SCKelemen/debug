@@ -8,16 +8,16 @@ import (
 	debug "github.com/SCKelemen/debug"
 )
 
-// V1Parser implements FlagParser for simple comma-separated flag strings
-type V1Parser struct{}
+// Parser implements FlagParser for simple comma-separated flag strings
+type Parser struct{}
 
-// NewV1Parser creates a new V1 parser
-func NewV1Parser() debug.FlagParser {
-	return &V1Parser{}
+// NewParser creates a new parser
+func NewParser() debug.FlagParser {
+	return &Parser{}
 }
 
 // ParseFlags parses comma-separated flag strings (V1 - simple configuration)
-func (p *V1Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, []debug.PathSeverityFilter, error) {
+func (p *Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, []debug.PathSeverityFilter, error) {
 	var enabledFlags debug.DebugFlag
 	var pathSeverityFilters []debug.PathSeverityFilter
 
@@ -53,7 +53,7 @@ func (p *V1Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, 
 }
 
 // parseFlagWithSeverity parses a flag string that may contain severity filtering
-func (p *V1Parser) parseFlagWithSeverity(flagStr string) (string, *debug.SeverityFilter, error) {
+func (p *Parser) parseFlagWithSeverity(flagStr string) (string, *debug.SeverityFilter, error) {
 	parts := strings.SplitN(flagStr, ":", 2)
 	if len(parts) != 2 {
 		// No severity filter, return the flag as-is
@@ -76,7 +76,7 @@ func (p *V1Parser) parseFlagWithSeverity(flagStr string) (string, *debug.Severit
 }
 
 // parseSeverityFilter parses a severity filter string
-func (p *V1Parser) parseSeverityFilter(severityStr string) (*debug.SeverityFilter, error) {
+func (p *Parser) parseSeverityFilter(severityStr string) (*debug.SeverityFilter, error) {
 	// Handle multiple severities with | (e.g., "ERROR|INFO")
 	if strings.Contains(severityStr, "|") {
 		severities := make(map[debug.Severity]bool)
@@ -122,7 +122,7 @@ func (p *V1Parser) parseSeverityFilter(severityStr string) (*debug.SeverityFilte
 }
 
 // parseSeverity converts a string to a Severity
-func (p *V1Parser) parseSeverity(severityStr string) (debug.Severity, error) {
+func (p *Parser) parseSeverity(severityStr string) (debug.Severity, error) {
 	switch strings.ToUpper(severityStr) {
 	case "TRACE":
 		return debug.SeverityTrace, nil
@@ -142,7 +142,7 @@ func (p *V1Parser) parseSeverity(severityStr string) (debug.Severity, error) {
 }
 
 // enableFlagsForPattern enables flags matching the given pattern
-func (p *V1Parser) enableFlagsForPattern(pattern string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string, enabledFlags *debug.DebugFlag) error {
+func (p *Parser) enableFlagsForPattern(pattern string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string, enabledFlags *debug.DebugFlag) error {
 	// Check if it's a direct flag name
 	if flag, exists := flagMap[pattern]; exists {
 		*enabledFlags |= flag
@@ -166,7 +166,7 @@ func (p *V1Parser) enableFlagsForPattern(pattern string, flagMap map[string]debu
 }
 
 // matchesGlob checks if a path matches a glob pattern
-func (p *V1Parser) matchesGlob(path, pattern string) bool {
+func (p *Parser) matchesGlob(path, pattern string) bool {
 	// Handle ** pattern (recursive match)
 	if strings.Contains(pattern, "**") {
 		// Convert ** pattern to a more flexible matching
