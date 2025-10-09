@@ -16,13 +16,13 @@ import (
 func WithDebugFlag(ctx context.Context, flag debug.DebugFlag, description string, dm *debug.DebugManager) context.Context {
 	// Get existing flags from context
 	existingFlags := debug.GetDebugFlagsFromContext(ctx)
-	
+
 	// Combine with new flag
 	combinedFlags := existingFlags | flag
-	
+
 	// Create new context with combined flags
 	newCtx := debug.WithDebugFlags(ctx, combinedFlags)
-	
+
 	return newCtx
 }
 

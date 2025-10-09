@@ -2,7 +2,6 @@ package debug
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -137,17 +136,15 @@ func TestDebugManager(t *testing.T) {
 		dm.RegisterFlags(flagDefs)
 		dm.enabledFlags = 1 << 0 // Manually enable a flag for testing
 
-		ctx := context.Background()
-
 		// Test basic logging
-		dm.Log(ctx, 1<<0, "Test message")
+		dm.Log(1<<0, "Test message")
 
 		// Test logging with severity
-		dm.LogWithSeverity(ctx, 1<<0, SeverityInfo, "http.request", "Info message")
+		dm.LogWithSeverity(1<<0, SeverityInfo, "http.request", "Info message")
 
-		// Test logging with context
-		ctxWithFlags := WithDebugFlags(ctx, 1<<3)
-		dm.LogWithContext(ctxWithFlags, 1<<3, "api.v1.auth.login", "Context message")
+		// Test logging with method context
+		mc := dm.WithMethodContext(1 << 3)
+		mc.Log("Context message")
 	})
 
 	t.Run("SeverityFiltering", func(t *testing.T) {
@@ -169,41 +166,39 @@ func TestDebugManager(t *testing.T) {
 			},
 		}
 
-		ctx := context.Background()
-
 		// Test that only ERROR severity logs
-		dm.LogWithSeverity(ctx, 1<<0, SeverityError, "http.request", "Error message")
-		dm.LogWithSeverity(ctx, 1<<0, SeverityInfo, "http.request", "Info message") // Should not log
+		dm.LogWithSeverity(1<<0, SeverityError, "http.request", "Error message")
+		dm.LogWithSeverity(1<<0, SeverityInfo, "http.request", "Info message") // Should not log
 	})
 
-	t.Run("ContextSystem", func(t *testing.T) {
-		// Test context creation
-		ctx := WithDebugFlags(context.Background(), 1<<3)
-		flags := GetDebugFlagsFromContext(ctx)
-		if flags != 1<<3 {
-			t.Error("Context should contain api.v1.auth.login flag")
+	t.Run("MethodContextSystem", func(t *testing.T) {
+		dm := &DebugManager{
+			flagMap: make(map[string]DebugFlag),
+			pathMap: make(map[DebugFlag]string),
+		}
+		dm.RegisterFlags(flagDefs)
+		dm.enabledFlags = 1<<0 | 1<<3 // Enable some flags for testing
+
+		// Test method context creation
+		mc := dm.WithMethodContext(1 << 3)
+		if mc.flags != 1<<3 {
+			t.Error("Method context should contain api.v1.auth.login flag")
 		}
 
-		// Test context with no flags
-		ctxEmpty := WithDebugFlags(context.Background(), 0)
-		flagsEmpty := GetDebugFlagsFromContext(ctxEmpty)
-		if flagsEmpty != 0 {
-			t.Error("Context should contain no flags")
+		// Test method context with no flags
+		mcEmpty := dm.WithMethodContext(0)
+		if mcEmpty.flags != 0 {
+			t.Error("Method context should contain no flags")
 		}
 
-		// Test context with multiple flags
-		ctxMulti := WithDebugFlags(context.Background(), 1<<0|1<<2)
-		flagsMulti := GetDebugFlagsFromContext(ctxMulti)
-		if flagsMulti != (1<<0 | 1<<2) {
-			t.Error("Context should contain multiple flags")
+		// Test method context with multiple flags
+		mcMulti := dm.WithMethodContext(1<<0 | 1<<2)
+		if mcMulti.flags != (1<<0 | 1<<2) {
+			t.Error("Method context should contain multiple flags")
 		}
 
-		// Test context without debug flags
-		ctxNoFlags := context.Background()
-		flagsNoFlags := GetDebugFlagsFromContext(ctxNoFlags)
-		if flagsNoFlags != 0 {
-			t.Error("Context without debug flags should return 0")
-		}
+		// Test method context logging
+		mc.Log("Test method context message")
 	})
 
 	t.Run("SlogIntegration", func(t *testing.T) {
@@ -218,8 +213,7 @@ func TestDebugManager(t *testing.T) {
 		dm.RegisterFlags(flagDefs)
 		dm.enabledFlags = 1 << 0 // Manually enable a flag for testing
 
-		ctx := context.Background()
-		dm.Log(ctx, 1<<0, "Slog test message")
+		dm.Log(1<<0, "Slog test message")
 
 		output := buf.String()
 		if !strings.Contains(output, "Slog test message") {
@@ -361,10 +355,9 @@ func TestEdgeCases(t *testing.T) {
 		dm.RegisterFlags(flagDefs)
 		dm.enabledFlags = 1 << 0 // Manually enable flag for testing
 
-		// Test logging with nil context
-		dm.Log(nil, 1<<0, "Test message")
-		dm.LogWithSeverity(nil, 1<<0, SeverityInfo, "test.flag", "Test message")
-		dm.LogWithContext(nil, 1<<0, "test.flag", "Test message")
+		// Test basic logging
+		dm.Log(1<<0, "Test message")
+		dm.LogWithSeverity(1<<0, SeverityInfo, "test.flag", "Test message")
 	})
 
 	t.Run("InvalidSeverity", func(t *testing.T) {
@@ -376,7 +369,7 @@ func TestEdgeCases(t *testing.T) {
 		dm.enabledFlags = 1 << 0 // Manually enable flag for testing
 
 		// Test logging with invalid severity
-		dm.LogWithSeverity(context.Background(), 1<<0, Severity(999), "test.flag", "Test message")
+		dm.LogWithSeverity(1<<0, Severity(999), "test.flag", "Test message")
 	})
 
 	t.Run("LargeFlagValues", func(t *testing.T) {

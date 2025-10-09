@@ -1,7 +1,6 @@
 package debug
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,23 +12,23 @@ import (
 // DebugFlag represents a single debug flag
 type DebugFlag uint64
 
-// Context key for storing debug flags in context
-type debugContextKey struct{}
-
-// WithDebugFlags adds debug flags to the context
-func WithDebugFlags(ctx context.Context, flags DebugFlag) context.Context {
-	return context.WithValue(ctx, debugContextKey{}, flags)
+// MethodContext represents a method-scoped context for debug flags
+type MethodContext struct {
+	flags DebugFlag
+	dm    *DebugManager
 }
 
-// GetDebugFlagsFromContext retrieves debug flags from the context
-func GetDebugFlagsFromContext(ctx context.Context) DebugFlag {
-	if ctx == nil {
-		return 0
+// WithMethodContext creates a new method context with the given flags
+func (dm *DebugManager) WithMethodContext(flags DebugFlag) *MethodContext {
+	return &MethodContext{
+		flags: flags,
+		dm:    dm,
 	}
-	if flags, ok := ctx.Value(debugContextKey{}).(DebugFlag); ok {
-		return flags
-	}
-	return 0
+}
+
+// Log writes a debug message using the method context flags
+func (mc *MethodContext) Log(format string, args ...interface{}) {
+	mc.dm.LogWithMethodContext(mc.flags, mc.flags, format, args...)
 }
 
 // Severity represents the severity level of a debug message
@@ -189,20 +188,20 @@ func (dm *DebugManager) IsEnabledByName(name string) bool {
 }
 
 // Log writes a debug message if the flag is enabled
-func (dm *DebugManager) Log(ctx context.Context, flag DebugFlag, format string, args ...interface{}) {
-	dm.LogWithSeverity(ctx, flag, SeverityDebug, "", format, args...)
+func (dm *DebugManager) Log(flag DebugFlag, format string, args ...interface{}) {
+	dm.LogWithSeverity(flag, SeverityDebug, "", format, args...)
 }
 
-// LogWithContext writes a debug message with additional context
-func (dm *DebugManager) LogWithContext(ctx context.Context, flag DebugFlag, contextStr string, format string, args ...interface{}) {
-	dm.LogWithSeverity(ctx, flag, SeverityDebug, contextStr, format, args...)
+// LogWithMethodContext writes a debug message using method context flags
+func (dm *DebugManager) LogWithMethodContext(methodFlags DebugFlag, flag DebugFlag, format string, args ...interface{}) {
+	dm.LogWithMethodContextAndSeverity(methodFlags, flag, SeverityDebug, "", format, args...)
 }
 
 // LogWithSeverity writes a debug message with severity level
-func (dm *DebugManager) LogWithSeverity(ctx context.Context, flag DebugFlag, severity Severity, contextStr string, format string, args ...interface{}) {
-	if dm.shouldLog(ctx, flag, severity) {
+func (dm *DebugManager) LogWithSeverity(flag DebugFlag, severity Severity, contextStr string, format string, args ...interface{}) {
+	if dm.shouldLog(0, flag, severity) {
 		message := fmt.Sprintf(format, args...)
-		path := dm.getPathWithContext(ctx, flag)
+		path := dm.getPath(flag)
 
 		if dm.logger != nil {
 			// Use structured logging with slog
@@ -214,7 +213,35 @@ func (dm *DebugManager) LogWithSeverity(ctx context.Context, flag DebugFlag, sev
 				attrs = append(attrs, slog.String("context", contextStr))
 			}
 
-			dm.logger.LogAttrs(ctx, dm.severityToSlogLevel(severity), message, attrs...)
+			dm.logger.LogAttrs(nil, dm.severityToSlogLevel(severity), message, attrs...)
+		} else {
+			// Use traditional logging
+			if contextStr != "" {
+				fmt.Fprintf(os.Stderr, "%s [%s] %s: %s\n", severity.String(), path, contextStr, message)
+			} else {
+				fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), path, message)
+			}
+		}
+	}
+}
+
+// LogWithMethodContextAndSeverity writes a debug message using method context flags with severity
+func (dm *DebugManager) LogWithMethodContextAndSeverity(methodFlags DebugFlag, flag DebugFlag, severity Severity, contextStr string, format string, args ...interface{}) {
+	if dm.shouldLogWithMethodContext(methodFlags, flag, severity) {
+		message := fmt.Sprintf(format, args...)
+		path := dm.getPath(flag)
+
+		if dm.logger != nil {
+			// Use structured logging with slog
+			attrs := []slog.Attr{
+				slog.String("flag", path),
+				slog.String("severity", severity.String()),
+			}
+			if contextStr != "" {
+				attrs = append(attrs, slog.String("context", contextStr))
+			}
+
+			dm.logger.LogAttrs(nil, dm.severityToSlogLevel(severity), message, attrs...)
 		} else {
 			// Use traditional logging
 			if contextStr != "" {
@@ -227,12 +254,9 @@ func (dm *DebugManager) LogWithSeverity(ctx context.Context, flag DebugFlag, sev
 }
 
 // shouldLog determines if a message should be logged based on flag and severity
-func (dm *DebugManager) shouldLog(ctx context.Context, flag DebugFlag, severity Severity) bool {
+func (dm *DebugManager) shouldLog(methodFlags DebugFlag, flag DebugFlag, severity Severity) bool {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
-
-	// Get context flags from the context parameter
-	contextFlags := GetDebugFlagsFromContext(ctx)
 
 	// Check if the current flag is enabled
 	if dm.enabledFlags&flag != 0 {
@@ -247,8 +271,8 @@ func (dm *DebugManager) shouldLog(ctx context.Context, flag DebugFlag, severity 
 		return severity >= dm.globalSeverityFilter.MinSeverity
 	}
 
-	// Check if any context flags are enabled (inheritance)
-	if contextFlags != 0 && dm.enabledFlags&contextFlags != 0 {
+	// Check if any method context flags are enabled (inheritance)
+	if methodFlags != 0 && dm.enabledFlags&methodFlags != 0 {
 		// Check severity filters
 		path := dm.pathMap[flag]
 		if dm.shouldLogWithPathSeverity(path, severity) {
@@ -261,6 +285,11 @@ func (dm *DebugManager) shouldLog(ctx context.Context, flag DebugFlag, severity 
 	}
 
 	return false
+}
+
+// shouldLogWithMethodContext determines if a message should be logged using method context
+func (dm *DebugManager) shouldLogWithMethodContext(methodFlags DebugFlag, flag DebugFlag, severity Severity) bool {
+	return dm.shouldLog(methodFlags, flag, severity)
 }
 
 // shouldLogWithPathSeverity checks if a message should be logged based on path-specific severity filters
@@ -312,8 +341,8 @@ func (dm *DebugManager) matchesGlob(path, pattern string) bool {
 	return matched
 }
 
-// getPathWithContext returns the path string for the given flag
-func (dm *DebugManager) getPathWithContext(ctx context.Context, flag DebugFlag) string {
+// getPath returns the path string for the given flag
+func (dm *DebugManager) getPath(flag DebugFlag) string {
 	path := dm.pathMap[flag]
 	if path == "" {
 		path = "unknown"
