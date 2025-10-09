@@ -33,7 +33,7 @@ func TestUnifiedArchitecture(t *testing.T) {
 	t.Run("ContextSystem", func(t *testing.T) {
 		// Test context with debug flags
 		ctx := WithDebugFlags(context.Background(), 1<<3) // api.v1.auth.login
-		
+
 		// The flag should be enabled because of context
 		contextFlags := GetDebugFlagsFromContext(ctx)
 		if contextFlags != 1<<3 {
@@ -41,4 +41,3 @@ func TestUnifiedArchitecture(t *testing.T) {
 		}
 	})
 }
-

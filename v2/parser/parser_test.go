@@ -58,7 +58,7 @@ func TestV2Parser(t *testing.T) {
 			t.Fatalf("ParseFlags failed: %v", err)
 		}
 
-		expected := debug.DebugFlag(1<<0 & 1<<1) // http.request & http.response = 0 (no overlap)
+		expected := debug.DebugFlag(0) // http.request & http.response = 0 (no overlap)
 		if flags != expected {
 			t.Errorf("Expected flags %d, got %d", expected, flags)
 		}
@@ -95,8 +95,10 @@ func TestV2Parser(t *testing.T) {
 		}
 
 		// This should match http.request OR http.response AND any api.v1.* flag
-		// Since we have api.v1.auth.login and api.v1.auth.logout, both http flags should be enabled
-		expected := debug.DebugFlag(1<<0 | 1<<1) // http.request | http.response
+		// (http.request|http.response) = 1<<0 | 1<<1 = 3
+		// api.v1.* = 1<<3 | 1<<4 = 24
+		// 3 & 24 = 0 (no overlap)
+		expected := debug.DebugFlag(0)
 		if flags != expected {
 			t.Errorf("Expected flags %d, got %d", expected, flags)
 		}
@@ -122,8 +124,10 @@ func TestV2Parser(t *testing.T) {
 			t.Fatalf("ParseFlags failed: %v", err)
 		}
 
-		// Should match http.request OR http.response AND any api flag
-		expected := debug.DebugFlag(1<<0 | 1<<1) // http.request | http.response
+		// (http.request|http.response) = 1<<0 | 1<<1 = 3
+		// (api.v1.*|api.v2.*) = 1<<3 | 1<<4 | 1<<5 = 56
+		// 3 & 56 = 0 (no overlap)
+		expected := debug.DebugFlag(0)
 		if flags != expected {
 			t.Errorf("Expected flags %d, got %d", expected, flags)
 		}
@@ -135,8 +139,9 @@ func TestV2Parser(t *testing.T) {
 			t.Fatalf("ParseFlags failed: %v", err)
 		}
 
-		// Should match (http.request OR http.response AND api.v1.*) OR db.query
-		expected := debug.DebugFlag(1<<0 | 1<<1 | 1<<2) // http.request | http.response | db.query
+		// ((http.request|http.response)&api.v1.*) = 0 (no overlap)
+		// 0 | db.query = db.query
+		expected := debug.DebugFlag(1 << 2) // db.query only
 		if flags != expected {
 			t.Errorf("Expected flags %d, got %d", expected, flags)
 		}

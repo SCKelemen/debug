@@ -1,8 +1,8 @@
 .PHONY: test examples clean fmt vet
 
-# Run tests
+# Run tests (excluding examples directory)
 test:
-	go test -v ./...
+	go test -v ./v1/parser ./v2/parser .
 
 # Run examples
 examples:

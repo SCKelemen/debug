@@ -9,12 +9,12 @@ import (
 func TestV1Parser(t *testing.T) {
 	// Define test flags
 	flagMap := map[string]debug.DebugFlag{
-		"http.request":    1 << 0,
-		"http.response":   1 << 1,
-		"db.query":        1 << 2,
-		"api.v1.auth.login": 1 << 3,
+		"http.request":       1 << 0,
+		"http.response":      1 << 1,
+		"db.query":           1 << 2,
+		"api.v1.auth.login":  1 << 3,
 		"api.v1.auth.logout": 1 << 4,
-		"api.v2.auth.login": 1 << 5,
+		"api.v2.auth.login":  1 << 5,
 	}
 
 	pathMap := map[debug.DebugFlag]string{
@@ -197,12 +197,12 @@ func TestV1Parser(t *testing.T) {
 func TestV1ParserGlobMatching(t *testing.T) {
 	// Test glob matching through the public API
 	flagMap := map[string]debug.DebugFlag{
-		"http.request":    1 << 0,
-		"http.response":   1 << 1,
-		"db.query":        1 << 2,
-		"api.v1.auth.login": 1 << 3,
+		"http.request":       1 << 0,
+		"http.response":      1 << 1,
+		"db.query":           1 << 2,
+		"api.v1.auth.login":  1 << 3,
 		"api.v1.auth.logout": 1 << 4,
-		"api.v2.auth.login": 1 << 5,
+		"api.v2.auth.login":  1 << 5,
 	}
 
 	pathMap := map[debug.DebugFlag]string{
