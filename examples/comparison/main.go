@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 
 	debug "github.com/SCKelemen/debug"
@@ -20,9 +19,6 @@ func main() {
 		{Flag: 1 << 5, Name: "api.v2.auth.login", Path: "api.v2.auth.login"},
 	}
 
-	// Create context with debug flags
-	ctx := debug.WithDebugFlags(context.Background(), debug.DebugFlag(1<<3)) // api.v1.auth.login
-
 	fmt.Println("=== V1 vs V2 Parser Comparison ===")
 
 	// V1 Parser - Simple comma-separated
@@ -31,9 +27,15 @@ func main() {
 	dm1.RegisterFlags(flagDefs)
 	dm1.SetFlags("http.*,db.query")
 
-	dm1.Log(ctx, 1<<0, "HTTP request with V1")
-	dm1.Log(ctx, 1<<1, "HTTP response with V1")
-	dm1.Log(ctx, 1<<2, "DB query with V1")
+	// Create method contexts for different operations
+	mc1 := dm1.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
+	mc1.Info("HTTP request with V1")
+
+	mc2 := dm1.WithMethodContext(debug.DebugFlag(1 << 1)) // http.response
+	mc2.Info("HTTP response with V1")
+
+	mc3 := dm1.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
+	mc3.Info("DB query with V1")
 
 	// V2 Parser - Logical expressions
 	fmt.Println("\n--- V2 Parser (Logical Expressions) ---")
@@ -41,9 +43,15 @@ func main() {
 	dm2.RegisterFlags(flagDefs)
 	dm2.SetFlags("http.request|db.query") // Same result as V1
 
-	dm2.Log(ctx, 1<<0, "HTTP request with V2")
-	dm2.Log(ctx, 1<<1, "HTTP response with V2") // Won't log (not in expression)
-	dm2.Log(ctx, 1<<2, "DB query with V2")
+	// Create method contexts for different operations
+	mc4 := dm2.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
+	mc4.Info("HTTP request with V2")
+
+	mc5 := dm2.WithMethodContext(debug.DebugFlag(1 << 1)) // http.response
+	mc5.Info("HTTP response with V2")                     // Won't log (not in expression)
+
+	mc6 := dm2.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
+	mc6.Info("DB query with V2")
 
 	// V2 Parser - Complex logical expressions
 	fmt.Println("\n--- V2 Parser (Complex Logic) ---")
@@ -51,9 +59,15 @@ func main() {
 	dm3.RegisterFlags(flagDefs)
 	dm3.SetFlags("(http.request|http.response)&api.v1.*")
 
-	dm3.Log(ctx, 1<<0, "HTTP request in API context")  // Will log
-	dm3.Log(ctx, 1<<1, "HTTP response in API context") // Will log
-	dm3.Log(ctx, 1<<2, "DB query in API context")      // Won't log (not http.*)
+	// Create method contexts for different operations
+	mc7 := dm3.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
+	mc7.Info("HTTP request in API context")               // Will log
+
+	mc8 := dm3.WithMethodContext(debug.DebugFlag(1 << 1)) // http.response
+	mc8.Info("HTTP response in API context")              // Will log
+
+	mc9 := dm3.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
+	mc9.Info("DB query in API context")                   // Won't log (not http.*)
 
 	// V2 Parser - V1 compatibility
 	fmt.Println("\n--- V2 Parser (V1 Compatibility) ---")
@@ -61,8 +75,12 @@ func main() {
 	dm4.RegisterFlags(flagDefs)
 	dm4.SetFlags("http.request,db.query") // V1 syntax in V2 parser
 
-	dm4.Log(ctx, 1<<0, "HTTP request with V1 syntax in V2")
-	dm4.Log(ctx, 1<<2, "DB query with V1 syntax in V2")
+	// Create method contexts for different operations
+	mc10 := dm4.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
+	mc10.Info("HTTP request with V1 syntax in V2")
+
+	mc11 := dm4.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
+	mc11.Info("DB query with V1 syntax in V2")
 
 	fmt.Println("\n=== Summary ===")
 	fmt.Println("V1 Parser: Simple comma-separated flags (http.*,db.query)")

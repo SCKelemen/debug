@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -30,13 +29,15 @@ func main() {
 	// Enable flags using V2 logical expressions
 	dm.SetFlags("http.request|db.query")
 
-	// Create context with debug flags
-	ctx := debug.WithDebugFlags(context.Background(), debug.DebugFlag(1<<3)) // api.v1.auth.login
-
-	// Log some messages
-	dm.Log(ctx, 1<<0, "Processing HTTP request with V2")  // http.request
-	dm.Log(ctx, 1<<2, "Executing database query with V2") // db.query
-	dm.Log(ctx, 1<<1, "This won't be logged - http.response not enabled")
+	// Create method contexts for different operations
+	mc1 := dm.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
+	mc1.Info("Processing HTTP request with V2")
+	
+	mc2 := dm.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
+	mc2.Info("Executing database query with V2")
+	
+	mc3 := dm.WithMethodContext(debug.DebugFlag(1 << 1)) // http.response
+	mc3.Info("This won't be logged - http.response not enabled")
 
 	fmt.Println()
 
@@ -46,9 +47,15 @@ func main() {
 	dm2.RegisterFlags(flagDefs)
 	dm2.SetFlags("(http.request|http.response)&api.v1.*")
 
-	dm2.Log(ctx, 1<<0, "HTTP request in API context")  // Should log
-	dm2.Log(ctx, 1<<1, "HTTP response in API context") // Should log
-	dm2.Log(ctx, 1<<2, "DB query in API context")      // Won't log (not http.*)
+	// Create method contexts for different operations
+	mc4 := dm2.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
+	mc4.Info("HTTP request in API context")  // Should log
+	
+	mc5 := dm2.WithMethodContext(debug.DebugFlag(1 << 1)) // http.response
+	mc5.Info("HTTP response in API context") // Should log
+	
+	mc6 := dm2.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
+	mc6.Info("DB query in API context")      // Won't log (not http.*)
 
 	fmt.Println()
 
@@ -60,8 +67,12 @@ func main() {
 	// V1 syntax still works in V2
 	dm3.SetFlags("http.request,db.query")
 
-	dm3.Log(ctx, 1<<0, "HTTP request with V1 syntax in V2")
-	dm3.Log(ctx, 1<<2, "DB query with V1 syntax in V2")
+	// Create method contexts for different operations
+	mc7 := dm3.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
+	mc7.Info("HTTP request with V1 syntax in V2")
+	
+	mc8 := dm3.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
+	mc8.Info("DB query with V1 syntax in V2")
 
 	fmt.Println()
 
@@ -76,6 +87,10 @@ func main() {
 	dm4.RegisterFlags(flagDefs)
 	dm4.SetFlags("api.v1.*|api.v2.*")
 
-	dm4.Log(ctx, 1<<3, "API v1 authentication")
-	dm4.Log(ctx, 1<<5, "API v2 authentication")
+	// Create method contexts for different operations
+	mc9 := dm4.WithMethodContext(debug.DebugFlag(1 << 3)) // api.v1.auth.login
+	mc9.Info("API v1 authentication with slog")
+	
+	mc10 := dm4.WithMethodContext(debug.DebugFlag(1 << 5)) // api.v2.auth.login
+	mc10.Info("API v2 authentication with slog")
 }

@@ -38,7 +38,7 @@ func (db *DatabaseService) GetUser(userID string) {
 	mc.Info("Processing results...")
 
 	// Security check with additional flag
-	mc.Warn(fmt.Sprintf("Sensitive data access: user %s", userID), debug.WithFlags(SecurityCheck))
+	mc.Warn(fmt.Sprintf("Sensitive data access: user %s", userID), debug.WithFlag(SecurityCheck))
 
 	mc.Info("Closing connection...")
 }

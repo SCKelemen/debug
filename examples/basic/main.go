@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -28,9 +27,13 @@ func main() {
 	dm1.RegisterFlags(flagDefs)
 	dm1.SetFlags("http.*,db.query")
 
-	ctx := debug.WithDebugFlags(context.Background(), debug.DebugFlag(1<<3))
-	dm1.Log(ctx, 1<<0, "Processing HTTP request")
-	dm1.Log(ctx, 1<<2, "Executing database query")
+	// Create method context for HTTP requests
+	mc1 := dm1.WithMethodContext(debug.DebugFlag(1 << 0))
+	mc1.Info("Processing HTTP request")
+
+	// Create method context for database queries
+	mc2 := dm1.WithMethodContext(debug.DebugFlag(1 << 2))
+	mc2.Info("Executing database query")
 
 	fmt.Println()
 
@@ -40,8 +43,13 @@ func main() {
 	dm2.RegisterFlags(flagDefs)
 	dm2.SetFlags("http.request|db.query")
 
-	dm2.Log(ctx, 1<<0, "Processing HTTP request with V2")
-	dm2.Log(ctx, 1<<2, "Executing database query with V2")
+	// Create method context for HTTP requests
+	mc3 := dm2.WithMethodContext(debug.DebugFlag(1 << 0))
+	mc3.Info("Processing HTTP request with V2")
+
+	// Create method context for database queries
+	mc4 := dm2.WithMethodContext(debug.DebugFlag(1 << 2))
+	mc4.Info("Executing database query with V2")
 
 	fmt.Println()
 
@@ -54,8 +62,13 @@ func main() {
 	dm3.RegisterFlags(flagDefs)
 	dm3.SetFlags("api.v1.*|api.v2.*")
 
-	dm3.Log(ctx, 1<<3, "API v1 authentication")
-	dm3.Log(ctx, 1<<5, "API v2 authentication")
+	// Create method context for API v1 authentication
+	mc5 := dm3.WithMethodContext(debug.DebugFlag(1 << 3))
+	mc5.Info("API v1 authentication")
+
+	// Create method context for API v2 authentication
+	mc6 := dm3.WithMethodContext(debug.DebugFlag(1 << 5))
+	mc6.Info("API v2 authentication")
 
 	fmt.Println()
 
@@ -65,9 +78,17 @@ func main() {
 	dm4.RegisterFlags(flagDefs)
 	dm4.SetFlags("(http.request|http.response)&api.v1.*")
 
-	dm4.Log(ctx, 1<<0, "HTTP request in API context")
-	dm4.Log(ctx, 1<<1, "HTTP response in API context")
-	dm4.Log(ctx, 1<<2, "DB query in API context (won't log)")
+	// Create method context for HTTP request in API context
+	mc7 := dm4.WithMethodContext(debug.DebugFlag(1 << 0))
+	mc7.Info("HTTP request in API context")
+
+	// Create method context for HTTP response in API context
+	mc8 := dm4.WithMethodContext(debug.DebugFlag(1 << 1))
+	mc8.Info("HTTP response in API context")
+
+	// Create method context for DB query (won't log due to complex expression)
+	mc9 := dm4.WithMethodContext(debug.DebugFlag(1 << 2))
+	mc9.Info("DB query in API context (won't log)")
 
 	fmt.Println()
 
@@ -77,6 +98,11 @@ func main() {
 	dm5.RegisterFlags(flagDefs)
 	dm5.SetFlags("http.request,db.query") // V1 syntax in V2 parser
 
-	dm5.Log(ctx, 1<<0, "HTTP request with V1 syntax in V2")
-	dm5.Log(ctx, 1<<2, "DB query with V1 syntax in V2")
+	// Create method context for HTTP request with V1 syntax in V2
+	mc10 := dm5.WithMethodContext(debug.DebugFlag(1 << 0))
+	mc10.Info("HTTP request with V1 syntax in V2")
+
+	// Create method context for DB query with V1 syntax in V2
+	mc11 := dm5.WithMethodContext(debug.DebugFlag(1 << 2))
+	mc11.Info("DB query with V1 syntax in V2")
 }

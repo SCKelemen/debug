@@ -44,10 +44,10 @@ func (db *DatabaseService) GetUser(userID string) (*User, error) {
 
 	// But for this specific security check, we want to add an additional flag
 	// Using the options pattern - clean and idiomatic Go
-	mc.Warn(fmt.Sprintf("Sensitive data access: user %s", userID), debug.WithFlags(SecurityCheck))
+	mc.Warn(fmt.Sprintf("Sensitive data access: user %s", userID), debug.WithFlag(SecurityCheck))
 
 	// Performance monitoring with additional flag
-	mc.Info("Query execution time: 150ms", debug.WithFlags(Performance))
+	mc.Info("Query execution time: 150ms", debug.WithFlag(Performance))
 
 	mc.Info("Closing connection...")
 
@@ -65,7 +65,7 @@ func (db *DatabaseService) ValidatePassword(userID, password string) bool {
 
 	// Security event with additional flag and custom severity
 	mc.Error(fmt.Sprintf("Password validation failed for user: %s", userID),
-		debug.WithFlags(SecurityCheck),
+		debug.WithFlag(SecurityCheck),
 		debug.WithSeverity(debug.SeverityError))
 
 	mc.Info("Password validation completed")
@@ -106,10 +106,10 @@ func (h *V1AuthHandler) Login(userID, password string) error {
 	}
 
 	// HTTP-related log with additional flag
-	mc.Info(fmt.Sprintf("Creating session for user: %s", userID), debug.WithFlags(HTTPRequest))
+	mc.Info(fmt.Sprintf("Creating session for user: %s", userID), debug.WithFlag(HTTPRequest))
 
 	// Performance monitoring
-	mc.Info("Login processing time: 200ms", debug.WithFlags(Performance))
+	mc.Info("Login processing time: 200ms", debug.WithFlag(Performance))
 
 	// Most log calls use only the method context flags
 	mc.Info(fmt.Sprintf("Login successful for user: %s", user.Email))
@@ -144,10 +144,10 @@ func (h *V2APIHandler) GetUserProfile(userID string) (*User, error) {
 	}
 
 	// Cache operation with additional flag
-	mc.Debug(fmt.Sprintf("Checking cache for user profile: %s", userID), debug.WithFlags(CacheRedis))
+	mc.Debug(fmt.Sprintf("Checking cache for user profile: %s", userID), debug.WithFlag(CacheRedis))
 
 	// Performance monitoring
-	mc.Info("Cache hit rate: 85%", debug.WithFlags(Performance))
+	mc.Info("Cache hit rate: 85%", debug.WithFlag(Performance))
 
 	// Most log calls use only the method context flags
 	mc.Info("Formatting response...")
@@ -224,8 +224,8 @@ func main() {
 	fmt.Println("1. Method context flags are preset for the entire method")
 	fmt.Println("2. Add options for ephemeral, one-line log cases")
 	fmt.Println("3. Idiomatic Go options pattern: debug.WithFlags(), debug.WithSeverity()")
-	fmt.Println("4. Clean API: mc.Debug(\"message\") or mc.Debug(\"message\", debug.WithFlags(flag))")
-	fmt.Println("5. Multiple options: mc.Debug(\"message\", debug.WithFlags(flag), debug.WithSeverity(severity))")
+	fmt.Println("4. Clean API: mc.Debug(\"message\") or mc.Debug(\"message\", debug.WithFlag(flag))")
+	fmt.Println("5. Multiple options: mc.Debug(\"message\", debug.WithFlag(flag), debug.WithSeverity(severity))")
 	fmt.Println("6. Perfect for security events, cache operations, performance monitoring, etc.")
 	fmt.Println("7. Best of both worlds: convenience + flexibility + idiomatic Go")
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 
 	debug "github.com/SCKelemen/debug"
@@ -27,14 +26,18 @@ func main() {
 	// Enable flags using V1 comma-separated syntax
 	dm.SetFlags("http.*,db.query")
 
-	// Create context with debug flags
-	ctx := debug.WithDebugFlags(context.Background(), debug.DebugFlag(1<<3)) // api.v1.auth.login
-
-	// Log some messages
-	dm.Log(ctx, 1<<0, "Processing HTTP request")  // http.request
-	dm.Log(ctx, 1<<1, "Processing HTTP response") // http.response
-	dm.Log(ctx, 1<<2, "Executing database query") // db.query
-	dm.Log(ctx, 1<<3, "API authentication")       // api.v1.auth.login
+	// Create method contexts for different operations
+	mc1 := dm.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
+	mc1.Info("Processing HTTP request")
+	
+	mc2 := dm.WithMethodContext(debug.DebugFlag(1 << 1)) // http.response
+	mc2.Info("Processing HTTP response")
+	
+	mc3 := dm.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
+	mc3.Info("Executing database query")
+	
+	mc4 := dm.WithMethodContext(debug.DebugFlag(1 << 3)) // api.v1.auth.login
+	mc4.Info("API authentication")
 
 	fmt.Println()
 
@@ -46,8 +49,14 @@ func main() {
 	// Enable flags with severity filtering
 	dm2.SetFlags("http.*:ERROR,db.query:+WARN")
 
-	dm2.LogWithSeverity(ctx, 1<<0, debug.SeverityError, "http.request", "HTTP request error")
-	dm2.LogWithSeverity(ctx, 1<<1, debug.SeverityInfo, "http.response", "HTTP response info") // Won't log (not ERROR)
-	dm2.LogWithSeverity(ctx, 1<<2, debug.SeverityWarning, "db.query", "DB query warning")
-	dm2.LogWithSeverity(ctx, 1<<2, debug.SeverityError, "db.query", "DB query error") // Will log (WARN+)
+	// Create method contexts for different operations with severity filtering
+	mc5 := dm2.WithMethodContext(debug.DebugFlag(1 << 0)) // http.request
+	mc5.Error("HTTP request error")
+	
+	mc6 := dm2.WithMethodContext(debug.DebugFlag(1 << 1)) // http.response
+	mc6.Info("HTTP response info") // Won't log (not ERROR)
+	
+	mc7 := dm2.WithMethodContext(debug.DebugFlag(1 << 2)) // db.query
+	mc7.Warn("DB query warning")
+	mc7.Error("DB query error") // Will log (WARN+)
 }

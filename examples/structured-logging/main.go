@@ -44,14 +44,14 @@ func (db *DatabaseService) GetUser(userID string) (*User, error) {
 
 	// Security event with structured data
 	mc.Warn("Sensitive data access",
-		debug.WithFlags(SecurityCheck),
+		debug.WithFlag(SecurityCheck),
 		debug.WithAttr(slog.String("userID", userID)),
 		debug.WithAttr(slog.String("dataType", "personal_info")),
 		debug.WithAttr(slog.String("accessReason", "authentication")))
 
 	// Performance monitoring with structured data
 	mc.Info("Query performance metrics",
-		debug.WithFlags(Performance),
+		debug.WithFlag(Performance),
 		debug.WithAttr(slog.String("operation", "user_lookup")),
 		debug.WithAttr(slog.Duration("totalTime", 200*time.Millisecond)),
 		debug.WithAttr(slog.Int("cacheHits", 0)),

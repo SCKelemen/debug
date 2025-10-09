@@ -28,10 +28,19 @@ type logOptions struct {
 	attrs           []slog.Attr
 }
 
-// WithFlags adds additional flags to the log call
-func WithFlags(flags DebugFlag) LogOption {
+// WithFlag adds a single additional flag to the log call
+func WithFlag(flag DebugFlag) LogOption {
 	return func(opts *logOptions) {
-		opts.additionalFlags |= flags
+		opts.additionalFlags |= flag
+	}
+}
+
+// WithFlags adds multiple additional flags to the log call
+func WithFlags(flags ...DebugFlag) LogOption {
+	return func(opts *logOptions) {
+		for _, flag := range flags {
+			opts.additionalFlags |= flag
+		}
 	}
 }
 
