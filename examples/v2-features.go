@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/SCKelemen/debug/debug"
-	v2 "github.com/SCKelemen/debug/v2"
+	debug "github.com/SCKelemen/debug"
+	v2parser "github.com/SCKelemen/debug/v2/parser"
 )
 
 func main() {
@@ -24,7 +24,7 @@ func main() {
 	fmt.Println("=== V2 Parser Example (Logical Expressions) ===")
 
 	// Create V2 debug manager with traditional logging
-	dm := v2.NewDebugManager()
+	dm := debug.NewDebugManager(v2parser.NewParser())
 	dm.RegisterFlags(flagDefs)
 
 	// Enable flags using V2 logical expressions
@@ -42,7 +42,7 @@ func main() {
 
 	// Example with complex logical expressions
 	fmt.Println("=== V2 Complex Logical Expressions ===")
-	dm2 := v2.NewDebugManager()
+	dm2 := debug.NewDebugManager(v2parser.NewParser())
 	dm2.RegisterFlags(flagDefs)
 	dm2.SetFlags("(http.request|http.response)&api.v1.*")
 
@@ -54,7 +54,7 @@ func main() {
 
 	// Example with V1 compatibility
 	fmt.Println("=== V2 with V1 Compatibility ===")
-	dm3 := v2.NewDebugManager()
+	dm3 := debug.NewDebugManager(v2parser.NewParser())
 	dm3.RegisterFlags(flagDefs)
 
 	// V1 syntax still works in V2
@@ -72,7 +72,7 @@ func main() {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
-	dm4 := v2.NewDebugManagerWithSlogHandler(handler)
+	dm4 := debug.NewDebugManagerWithSlogHandler(v2parser.NewParser(), handler)
 	dm4.RegisterFlags(flagDefs)
 	dm4.SetFlags("api.v1.*|api.v2.*")
 

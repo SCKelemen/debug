@@ -1,12 +1,21 @@
-.PHONY: test example clean fmt vet
+.PHONY: test examples clean fmt vet
 
 # Run tests
 test:
-	go test -v ./debug
+	go test -v .
 
-# Run example
+# Run examples
+examples:
+	@echo "=== Running V1 Simple Example ==="
+	go run ./examples/v1-simple.go
+	@echo "\n=== Running V2 Features Example ==="
+	go run ./examples/v2-features.go
+	@echo "\n=== Running Comparison Example ==="
+	go run ./examples/comparison.go
+
+# Run basic example
 example:
-	go run ./example/main.go
+	go run ./examples/basic.go
 
 # Format code
 fmt:
