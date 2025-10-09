@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // DebugFlag represents a single debug flag
@@ -22,6 +23,9 @@ func WithDebugFlags(ctx context.Context, flags DebugFlag) context.Context {
 
 // GetDebugFlagsFromContext retrieves debug flags from the context
 func GetDebugFlagsFromContext(ctx context.Context) DebugFlag {
+	if ctx == nil {
+		return 0
+	}
 	if flags, ok := ctx.Value(debugContextKey{}).(DebugFlag); ok {
 		return flags
 	}
@@ -89,11 +93,53 @@ const (
 	SeverityFilterSpecific                           // Show only specific severities
 )
 
+// DebugManager manages debug flags and logging
+type DebugManager struct {
+	mu                   sync.RWMutex
+	parser               FlagParser
+	flagMap              map[string]DebugFlag
+	pathMap              map[DebugFlag]string
+	allFlags             []DebugFlag
+	enabledFlags         DebugFlag
+	pathSeverityFilters  []PathSeverityFilter
+	globalSeverityFilter SeverityFilter
+	logger               *slog.Logger
+}
+
+// NewDebugManager creates a new debug manager with the specified parser
+func NewDebugManager(parser FlagParser) *DebugManager {
+	return &DebugManager{
+		parser:  parser,
+		flagMap: make(map[string]DebugFlag),
+		pathMap: make(map[DebugFlag]string),
+	}
+}
+
+// NewDebugManagerWithSlog creates a new debug manager with slog integration
+func NewDebugManagerWithSlog(parser FlagParser) *DebugManager {
+	return &DebugManager{
+		parser:  parser,
+		flagMap: make(map[string]DebugFlag),
+		pathMap: make(map[DebugFlag]string),
+		logger:  slog.Default(),
+	}
+}
+
+// NewDebugManagerWithSlogHandler creates a new debug manager with a custom slog handler
+func NewDebugManagerWithSlogHandler(parser FlagParser, handler slog.Handler) *DebugManager {
+	return &DebugManager{
+		parser:  parser,
+		flagMap: make(map[string]DebugFlag),
+		pathMap: make(map[DebugFlag]string),
+		logger:  slog.New(handler),
+	}
+}
+
 // RegisterFlags registers debug flags with the manager
 func (dm *DebugManager) RegisterFlags(definitions []FlagDefinition) {
 	dm.mu.Lock()
 	defer dm.mu.Unlock()
-	
+
 	for _, def := range definitions {
 		dm.flagMap[def.Name] = def.Flag
 		dm.pathMap[def.Flag] = def.Path
@@ -109,7 +155,7 @@ func (dm *DebugManager) SetFlags(flags string) error {
 
 	dm.mu.Lock()
 	defer dm.mu.Unlock()
-	
+
 	// Clear existing path severity filters
 	dm.pathSeverityFilters = []PathSeverityFilter{}
 
@@ -119,7 +165,7 @@ func (dm *DebugManager) SetFlags(flags string) error {
 		return err
 	}
 
-	dm.flags = enabledFlags
+	dm.enabledFlags = enabledFlags
 	dm.pathSeverityFilters = pathFilters
 	return nil
 }
@@ -128,16 +174,16 @@ func (dm *DebugManager) SetFlags(flags string) error {
 func (dm *DebugManager) IsEnabled(flag DebugFlag) bool {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
-	return dm.flags&flag != 0
+	return dm.enabledFlags&flag != 0
 }
 
 // IsEnabledByName checks if a flag is enabled by name
 func (dm *DebugManager) IsEnabledByName(name string) bool {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
-	
+
 	if flag, exists := dm.flagMap[name]; exists {
-		return dm.flags&flag != 0
+		return dm.enabledFlags&flag != 0
 	}
 	return false
 }
@@ -184,32 +230,37 @@ func (dm *DebugManager) LogWithSeverity(ctx context.Context, flag DebugFlag, sev
 func (dm *DebugManager) shouldLog(ctx context.Context, flag DebugFlag, severity Severity) bool {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
-	
+
 	// Get context flags from the context parameter
 	contextFlags := GetDebugFlagsFromContext(ctx)
-	
-	// Combine the flag with context flags
-	combinedFlag := flag | contextFlags
 
-	// Check if the combined flag (including context) is enabled
-	if dm.flags&combinedFlag == 0 {
-		return false
+	// Check if the current flag is enabled
+	if dm.enabledFlags&flag != 0 {
+		// Check severity filters
+		path := dm.pathMap[flag]
+		if dm.shouldLogWithPathSeverity(path, severity) {
+			return true
+		}
+		if len(dm.pathSeverityFilters) > 0 {
+			return false
+		}
+		return severity >= dm.globalSeverityFilter.MinSeverity
 	}
 
-	path := dm.pathMap[flag]
-
-	// Check if there's a path-specific severity filter for this path
-	if dm.shouldLogWithPathSeverity(path, severity) {
-		return true
+	// Check if any context flags are enabled (inheritance)
+	if contextFlags != 0 && dm.enabledFlags&contextFlags != 0 {
+		// Check severity filters
+		path := dm.pathMap[flag]
+		if dm.shouldLogWithPathSeverity(path, severity) {
+			return true
+		}
+		if len(dm.pathSeverityFilters) > 0 {
+			return false
+		}
+		return severity >= dm.globalSeverityFilter.MinSeverity
 	}
 
-	// If there are path-specific filters but none match this path, don't log
-	if len(dm.pathSeverityFilters) > 0 {
-		return false
-	}
-
-	// Use global severity filter
-	return severity >= dm.severityFilter
+	return false
 }
 
 // shouldLogWithPathSeverity checks if a message should be logged based on path-specific severity filters
@@ -245,7 +296,7 @@ func (dm *DebugManager) matchesGlob(path, pattern string) bool {
 		if len(parts) == 2 {
 			prefix := strings.TrimSuffix(parts[0], ".")
 			suffix := strings.TrimPrefix(parts[1], ".")
-			
+
 			if prefix != "" && !strings.HasPrefix(path, prefix) {
 				return false
 			}
@@ -255,36 +306,18 @@ func (dm *DebugManager) matchesGlob(path, pattern string) bool {
 			return true
 		}
 	}
-	
+
 	// Use standard filepath.Match for other patterns
 	matched, _ := filepath.Match(pattern, path)
 	return matched
 }
 
-// getPathWithContext returns the path string including context information
+// getPathWithContext returns the path string for the given flag
 func (dm *DebugManager) getPathWithContext(ctx context.Context, flag DebugFlag) string {
 	path := dm.pathMap[flag]
 	if path == "" {
 		path = "unknown"
 	}
-
-	// Add context information if available
-	contextFlags := GetDebugFlagsFromContext(ctx)
-	if contextFlags != 0 {
-		var contextPaths []string
-		// Extract individual flags from the combined context flags
-		for _, definedFlag := range dm.allFlags {
-			if contextFlags&definedFlag != 0 {
-				if ctxPath := dm.pathMap[definedFlag]; ctxPath != "" {
-					contextPaths = append(contextPaths, ctxPath)
-				}
-			}
-		}
-		if len(contextPaths) > 0 {
-			path = fmt.Sprintf("%s (ctx: %s)", path, strings.Join(contextPaths, " -> "))
-		}
-	}
-
 	return path
 }
 
