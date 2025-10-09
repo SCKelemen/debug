@@ -18,6 +18,44 @@ type MethodContext struct {
 	dm    *DebugManager
 }
 
+// LogOption represents an option for logging
+type LogOption func(*logOptions)
+
+// logOptions holds the options for a log call
+type logOptions struct {
+	additionalFlags DebugFlag
+	severity        Severity
+	attrs           []slog.Attr
+}
+
+// WithFlags adds additional flags to the log call
+func WithFlags(flags DebugFlag) LogOption {
+	return func(opts *logOptions) {
+		opts.additionalFlags |= flags
+	}
+}
+
+// WithSeverity sets the severity for the log call
+func WithSeverity(severity Severity) LogOption {
+	return func(opts *logOptions) {
+		opts.severity = severity
+	}
+}
+
+// WithAttr adds a structured attribute to the log call
+func WithAttr(attr slog.Attr) LogOption {
+	return func(opts *logOptions) {
+		opts.attrs = append(opts.attrs, attr)
+	}
+}
+
+// WithAttrs adds multiple structured attributes to the log call
+func WithAttrs(attrs []slog.Attr) LogOption {
+	return func(opts *logOptions) {
+		opts.attrs = append(opts.attrs, attrs...)
+	}
+}
+
 // WithMethodContext creates a new method context with the given flags
 func (dm *DebugManager) WithMethodContext(flags DebugFlag) *MethodContext {
 	return &MethodContext{
@@ -29,6 +67,53 @@ func (dm *DebugManager) WithMethodContext(flags DebugFlag) *MethodContext {
 // Log writes a debug message using the method context flags
 func (mc *MethodContext) Log(format string, args ...interface{}) {
 	mc.dm.LogWithMethodContext(mc.flags, mc.flags, format, args...)
+}
+
+// Debug writes a debug message using method context flags with optional options
+func (mc *MethodContext) Debug(msg interface{}, opts ...LogOption) {
+	mc.logWithOptions(SeverityDebug, msg, opts...)
+}
+
+// Info writes an info message using method context flags with optional options
+func (mc *MethodContext) Info(msg interface{}, opts ...LogOption) {
+	mc.logWithOptions(SeverityInfo, msg, opts...)
+}
+
+// Warn writes a warning message using method context flags with optional options
+func (mc *MethodContext) Warn(msg interface{}, opts ...LogOption) {
+	mc.logWithOptions(SeverityWarning, msg, opts...)
+}
+
+// Error writes an error message using method context flags with optional options
+func (mc *MethodContext) Error(msg interface{}, opts ...LogOption) {
+	mc.logWithOptions(SeverityError, msg, opts...)
+}
+
+// logWithOptions handles the common logic for option-based logging
+func (mc *MethodContext) logWithOptions(defaultSeverity Severity, msg interface{}, opts ...LogOption) {
+	// Parse options
+	options := &logOptions{
+		severity: defaultSeverity,
+	}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	// Combine method context flags with additional flags
+	combinedFlags := mc.flags | options.additionalFlags
+
+	// Format message
+	var message string
+	switch v := msg.(type) {
+	case string:
+		message = v
+	case fmt.Stringer:
+		message = v.String()
+	default:
+		message = fmt.Sprintf("%v", v)
+	}
+
+	mc.dm.LogWithMethodContextAndSeverityAndAttrs(mc.flags, combinedFlags, options.severity, "", message, options.attrs)
 }
 
 // Severity represents the severity level of a debug message
@@ -229,7 +314,7 @@ func (dm *DebugManager) LogWithSeverity(flag DebugFlag, severity Severity, conte
 func (dm *DebugManager) LogWithMethodContextAndSeverity(methodFlags DebugFlag, flag DebugFlag, severity Severity, contextStr string, format string, args ...interface{}) {
 	if dm.shouldLogWithMethodContext(methodFlags, flag, severity) {
 		message := fmt.Sprintf(format, args...)
-		path := dm.getPath(flag)
+		path := dm.getPathForCombinedFlags(flag)
 
 		if dm.logger != nil {
 			// Use structured logging with slog
@@ -249,6 +334,47 @@ func (dm *DebugManager) LogWithMethodContextAndSeverity(methodFlags DebugFlag, f
 			} else {
 				fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), path, message)
 			}
+		}
+	}
+}
+
+// LogWithMethodContextAndSeverityAndAttrs writes a debug message using method context flags with severity and structured attributes
+func (dm *DebugManager) LogWithMethodContextAndSeverityAndAttrs(methodFlags DebugFlag, flag DebugFlag, severity Severity, contextStr string, message string, attrs []slog.Attr) {
+	if dm.shouldLogWithMethodContext(methodFlags, flag, severity) {
+		path := dm.getPathForCombinedFlags(flag)
+
+		if dm.logger != nil {
+			// Use structured logging with slog
+			allAttrs := []slog.Attr{
+				slog.String("flag", path),
+				slog.String("severity", severity.String()),
+			}
+			if contextStr != "" {
+				allAttrs = append(allAttrs, slog.String("context", contextStr))
+			}
+			// Add user-provided attributes
+			allAttrs = append(allAttrs, attrs...)
+
+			dm.logger.LogAttrs(nil, dm.severityToSlogLevel(severity), message, allAttrs...)
+		} else {
+			// Use traditional logging
+			if contextStr != "" {
+				fmt.Fprintf(os.Stderr, "%s [%s] %s: %s", severity.String(), path, contextStr, message)
+			} else {
+				fmt.Fprintf(os.Stderr, "%s [%s]: %s", severity.String(), path, message)
+			}
+			// Print structured attributes in traditional format
+			if len(attrs) > 0 {
+				fmt.Fprintf(os.Stderr, " {")
+				for i, attr := range attrs {
+					if i > 0 {
+						fmt.Fprintf(os.Stderr, ", ")
+					}
+					fmt.Fprintf(os.Stderr, "%s=%v", attr.Key, attr.Value.Any())
+				}
+				fmt.Fprintf(os.Stderr, "}")
+			}
+			fmt.Fprintf(os.Stderr, "\n")
 		}
 	}
 }
@@ -348,6 +474,25 @@ func (dm *DebugManager) getPath(flag DebugFlag) string {
 		path = "unknown"
 	}
 	return path
+}
+
+// getPathForCombinedFlags returns the path string for combined flags
+func (dm *DebugManager) getPathForCombinedFlags(combinedFlags DebugFlag) string {
+	// If it's a single flag, use the regular getPath
+	if path := dm.pathMap[combinedFlags]; path != "" {
+		return path
+	}
+
+	// For combined flags, find the first matching flag and return its path
+	for _, definedFlag := range dm.allFlags {
+		if combinedFlags&definedFlag != 0 {
+			if path := dm.pathMap[definedFlag]; path != "" {
+				return path
+			}
+		}
+	}
+
+	return "unknown"
 }
 
 // IsSlogEnabled returns whether slog integration is enabled
