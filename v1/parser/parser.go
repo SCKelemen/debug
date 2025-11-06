@@ -17,8 +17,8 @@ func NewParser() debug.FlagParser {
 }
 
 // ParseFlags parses comma-separated flag strings (V1 - simple configuration)
-func (p *Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, []debug.PathSeverityFilter, error) {
-	var enabledFlags debug.DebugFlag
+func (p *Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pathMap interface{}) (debug.DebugFlag, []debug.PathSeverityFilter, error) {
+	var enabledFlags debug.DebugFlag // nil is equivalent to empty flags
 	var pathSeverityFilters []debug.PathSeverityFilter
 
 	// Parse comma-separated flags
@@ -32,7 +32,7 @@ func (p *Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pa
 		// Check for severity filter syntax (e.g., "path:SEVERITY")
 		path, severityFilter, err := p.parseFlagWithSeverity(flagName)
 		if err != nil {
-			return 0, nil, err
+			return nil, nil, err
 		}
 
 		if severityFilter != nil {
@@ -43,8 +43,8 @@ func (p *Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pa
 			})
 		} else {
 			// This is a regular flag or glob pattern
-			if err := p.enableFlagsForPattern(path, flagMap, pathMap, &enabledFlags); err != nil {
-				return 0, nil, err
+			if err := p.enableFlagsForPattern(path, flagMap, &enabledFlags); err != nil {
+				return nil, nil, err
 			}
 		}
 	}
@@ -142,18 +142,26 @@ func (p *Parser) parseSeverity(severityStr string) (debug.Severity, error) {
 }
 
 // enableFlagsForPattern enables flags matching the given pattern
-func (p *Parser) enableFlagsForPattern(pattern string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string, enabledFlags *debug.DebugFlag) error {
+func (p *Parser) enableFlagsForPattern(pattern string, flagMap map[string]debug.DebugFlag, enabledFlags *debug.DebugFlag) error {
 	// Check if it's a direct flag name
 	if flag, exists := flagMap[pattern]; exists {
-		*enabledFlags |= flag
+		if *enabledFlags == nil {
+			*enabledFlags = flag
+		} else {
+			*enabledFlags = (*enabledFlags).Or(flag)
+		}
 		return nil
 	}
 
-	// Check if it's a glob pattern
+	// Check if it's a glob pattern - iterate through flagMap since pathMap can't use slice keys
 	matched := false
-	for flag, path := range pathMap {
-		if p.matchesGlob(path, pattern) {
-			*enabledFlags |= flag
+	for flagName, flag := range flagMap {
+		if p.matchesGlob(flagName, pattern) {
+			if *enabledFlags == nil {
+				*enabledFlags = flag
+			} else {
+				*enabledFlags = (*enabledFlags).Or(flag)
+			}
 			matched = true
 		}
 	}

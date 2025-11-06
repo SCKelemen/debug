@@ -17,16 +17,16 @@ func NewParser() debug.FlagParser {
 }
 
 // ParseFlags parses logical expression flag strings (V2 - with logical expressions)
-func (p *Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, []debug.PathSeverityFilter, error) {
-	var enabledFlags debug.DebugFlag
+func (p *Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pathMap interface{}) (debug.DebugFlag, []debug.PathSeverityFilter, error) {
+	var enabledFlags debug.DebugFlag // nil is equivalent to empty flags
 	var pathSeverityFilters []debug.PathSeverityFilter
 
 	// Check if this is a logical expression (contains logical operators)
 	if strings.ContainsAny(flags, "&|!()") {
 		// Parse as V2 logical expression
-		enabledFlags, err := p.parseLogicalExpression(flags, flagMap, pathMap)
+		enabledFlags, err := p.parseLogicalExpression(flags, flagMap)
 		if err != nil {
-			return 0, nil, err
+			return nil, nil, err
 		}
 		return enabledFlags, pathSeverityFilters, nil
 	}
@@ -42,7 +42,7 @@ func (p *Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pa
 		// Check for severity filter syntax (e.g., "path:SEVERITY")
 		path, severityFilter, err := p.parseFlagWithSeverity(flagName)
 		if err != nil {
-			return 0, nil, err
+			return nil, nil, err
 		}
 
 		if severityFilter != nil {
@@ -53,8 +53,8 @@ func (p *Parser) ParseFlags(flags string, flagMap map[string]debug.DebugFlag, pa
 			})
 		} else {
 			// This is a regular flag or glob pattern
-			if err := p.enableFlagsForPattern(path, flagMap, pathMap, &enabledFlags); err != nil {
-				return 0, nil, err
+			if err := p.enableFlagsForPattern(path, flagMap, &enabledFlags); err != nil {
+				return nil, nil, err
 			}
 		}
 	}
@@ -81,19 +81,19 @@ const (
 )
 
 // parseLogicalExpression parses a logical expression and returns enabled flags
-func (p *Parser) parseLogicalExpression(expr string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
+func (p *Parser) parseLogicalExpression(expr string, flagMap map[string]debug.DebugFlag) (debug.DebugFlag, error) {
 	// Parse V2 logical expression
 	node, err := p.parseV2Expression(strings.TrimSpace(expr))
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	// Evaluate the expression
-	return p.evaluateExpression(node, flagMap, pathMap)
+	return p.evaluateExpression(node, flagMap)
 }
 
 // parseV1Expression parses comma-separated flags into an OR expression
-func (p *Parser) parseV1Expression(expr string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
+func (p *Parser) parseV1Expression(expr string, flagMap map[string]debug.DebugFlag) (debug.DebugFlag, error) {
 	var enabledFlags debug.DebugFlag
 	flagNames := strings.Split(expr, ",")
 
@@ -103,8 +103,8 @@ func (p *Parser) parseV1Expression(expr string, flagMap map[string]debug.DebugFl
 			continue
 		}
 
-		if err := p.enableFlagsForPattern(flagName, flagMap, pathMap, &enabledFlags); err != nil {
-			return 0, err
+		if err := p.enableFlagsForPattern(flagName, flagMap, &enabledFlags); err != nil {
+			return nil, err
 		}
 	}
 
@@ -237,65 +237,81 @@ func (p *Parser) findOperatorRightToLeft(expr, op string) int {
 }
 
 // evaluateExpression evaluates the expression AST and returns enabled flags
-func (p *Parser) evaluateExpression(node *ExpressionNode, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
+func (p *Parser) evaluateExpression(node *ExpressionNode, flagMap map[string]debug.DebugFlag) (debug.DebugFlag, error) {
 	switch node.Type {
 	case NodeFlag:
-		return p.evaluateFlag(node.Value, flagMap, pathMap)
+		return p.evaluateFlag(node.Value, flagMap)
 	case NodeOr:
 		if len(node.Children) != 2 {
-			return 0, fmt.Errorf("OR node must have exactly 2 children")
+			return nil, fmt.Errorf("OR node must have exactly 2 children")
 		}
-		left, err := p.evaluateExpression(node.Children[0], flagMap, pathMap)
+		left, err := p.evaluateExpression(node.Children[0], flagMap)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
-		right, err := p.evaluateExpression(node.Children[1], flagMap, pathMap)
+		right, err := p.evaluateExpression(node.Children[1], flagMap)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
-		return left | right, nil
+		if left == nil {
+			return right, nil
+		}
+		if right == nil {
+			return left, nil
+		}
+		return left.Or(right), nil
 	case NodeAnd:
 		if len(node.Children) != 2 {
-			return 0, fmt.Errorf("AND node must have exactly 2 children")
+			return nil, fmt.Errorf("AND node must have exactly 2 children")
 		}
-		left, err := p.evaluateExpression(node.Children[0], flagMap, pathMap)
+		left, err := p.evaluateExpression(node.Children[0], flagMap)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
-		right, err := p.evaluateExpression(node.Children[1], flagMap, pathMap)
+		right, err := p.evaluateExpression(node.Children[1], flagMap)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
-		return left & right, nil
+		if left == nil || right == nil {
+			return nil, nil
+		}
+		return left.And(right), nil
 	case NodeNot:
 		if len(node.Children) != 1 {
-			return 0, fmt.Errorf("NOT node must have exactly 1 child")
+			return nil, fmt.Errorf("NOT node must have exactly 1 child")
 		}
-		child, err := p.evaluateExpression(node.Children[0], flagMap, pathMap)
+		child, err := p.evaluateExpression(node.Children[0], flagMap)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		// NOT operation: return all flags except the child flags
 		var allFlags debug.DebugFlag
 		for _, flag := range flagMap {
-			allFlags |= flag
+			if allFlags == nil {
+				allFlags = flag
+			} else {
+				allFlags = allFlags.Or(flag)
+			}
 		}
-		return allFlags &^ child, nil
+		if allFlags == nil {
+			return nil, nil
+		}
+		return allFlags.AndNot(child), nil
 	case NodeGroup:
 		if len(node.Children) != 1 {
-			return 0, fmt.Errorf("GROUP node must have exactly 1 child")
+			return nil, fmt.Errorf("GROUP node must have exactly 1 child")
 		}
-		return p.evaluateExpression(node.Children[0], flagMap, pathMap)
+		return p.evaluateExpression(node.Children[0], flagMap)
 	default:
-		return 0, fmt.Errorf("unknown node type: %v", node.Type)
+		return nil, fmt.Errorf("unknown node type: %v", node.Type)
 	}
 }
 
 // evaluateFlag evaluates a single flag or glob pattern
-func (p *Parser) evaluateFlag(flagName string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string) (debug.DebugFlag, error) {
+func (p *Parser) evaluateFlag(flagName string, flagMap map[string]debug.DebugFlag) (debug.DebugFlag, error) {
 	var enabledFlags debug.DebugFlag
-	if err := p.enableFlagsForPattern(flagName, flagMap, pathMap, &enabledFlags); err != nil {
-		return 0, err
+	if err := p.enableFlagsForPattern(flagName, flagMap, &enabledFlags); err != nil {
+		return nil, err
 	}
 	return enabledFlags, nil
 }
@@ -390,18 +406,26 @@ func (p *Parser) parseSeverity(severityStr string) (debug.Severity, error) {
 }
 
 // enableFlagsForPattern enables flags matching the given pattern
-func (p *Parser) enableFlagsForPattern(pattern string, flagMap map[string]debug.DebugFlag, pathMap map[debug.DebugFlag]string, enabledFlags *debug.DebugFlag) error {
+func (p *Parser) enableFlagsForPattern(pattern string, flagMap map[string]debug.DebugFlag, enabledFlags *debug.DebugFlag) error {
 	// Check if it's a direct flag name
 	if flag, exists := flagMap[pattern]; exists {
-		*enabledFlags |= flag
+		if *enabledFlags == nil {
+			*enabledFlags = flag
+		} else {
+			*enabledFlags = (*enabledFlags).Or(flag)
+		}
 		return nil
 	}
 
-	// Check if it's a glob pattern
+	// Check if it's a glob pattern - iterate through flagMap since pathMap can't use slice keys
 	matched := false
-	for flag, path := range pathMap {
-		if p.matchesGlob(path, pattern) {
-			*enabledFlags |= flag
+	for flagName, flag := range flagMap {
+		if p.matchesGlob(flagName, pattern) {
+			if *enabledFlags == nil {
+				*enabledFlags = flag
+			} else {
+				*enabledFlags = (*enabledFlags).Or(flag)
+			}
 			matched = true
 		}
 	}

@@ -9,8 +9,115 @@ import (
 	"sync"
 )
 
-// DebugFlag represents a single debug flag
-type DebugFlag uint64
+// DebugFlag represents a debug flag (can be a single flag or multiple combined flags)
+// It's implemented as a slice of uint64 to support more than 64 flags.
+// Each uint64 holds 64 flags, so flag N is at bit (N % 64) in slice[N/64].
+type DebugFlag []uint64
+
+// NewDebugFlag creates a new DebugFlag with a single bit set at the given position
+func NewDebugFlag(bitPosition int) DebugFlag {
+	if bitPosition < 0 {
+		return nil
+	}
+	sliceIndex := bitPosition / 64
+	bitIndex := uint(bitPosition % 64)
+	flags := make(DebugFlag, sliceIndex+1)
+	flags[sliceIndex] = 1 << bitIndex
+	return flags
+}
+
+// DebugFlagFromUint64 creates a DebugFlag from a uint64 value (for backward compatibility)
+// This allows existing code like DebugFlag(1 << 0) to work by converting uint64 to []uint64
+func DebugFlagFromUint64(val uint64) DebugFlag {
+	if val == 0 {
+		return nil
+	}
+	return DebugFlag{val}
+}
+
+// HasFlag checks if the given flag is set (fast path - only checks relevant slice element)
+func (f DebugFlag) HasFlag(flag DebugFlag) bool {
+	if len(flag) == 0 {
+		return false
+	}
+	// Find the highest bit position in the flag to determine which slice elements to check
+	for i := len(flag) - 1; i >= 0; i-- {
+		if flag[i] != 0 {
+			if i >= len(f) {
+				return false
+			}
+			if f[i]&flag[i] != 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Or combines two flags using OR operation
+func (f DebugFlag) Or(other DebugFlag) DebugFlag {
+	maxLen := len(f)
+	if len(other) > maxLen {
+		maxLen = len(other)
+	}
+	if maxLen == 0 {
+		return nil
+	}
+	result := make(DebugFlag, maxLen)
+	for i := 0; i < maxLen; i++ {
+		var left, right uint64
+		if i < len(f) {
+			left = f[i]
+		}
+		if i < len(other) {
+			right = other[i]
+		}
+		result[i] = left | right
+	}
+	return result
+}
+
+// And combines two flags using AND operation
+func (f DebugFlag) And(other DebugFlag) DebugFlag {
+	maxLen := len(f)
+	if len(other) < maxLen {
+		maxLen = len(other)
+	}
+	if maxLen == 0 {
+		return nil
+	}
+	result := make(DebugFlag, maxLen)
+	for i := 0; i < maxLen; i++ {
+		result[i] = f[i] & other[i]
+	}
+	return result
+}
+
+// AndNot performs AND NOT operation (f &^ other)
+func (f DebugFlag) AndNot(other DebugFlag) DebugFlag {
+	if len(f) == 0 {
+		return nil
+	}
+	result := make(DebugFlag, len(f))
+	for i := 0; i < len(f); i++ {
+		var otherVal uint64
+		if i < len(other) {
+			otherVal = other[i]
+		}
+		result[i] = f[i] &^ otherVal
+	}
+	return result
+}
+
+// IsZero checks if the flag has no bits set
+func (f DebugFlag) IsZero() bool {
+	for i := 0; i < len(f); i++ {
+		if f[i] != 0 {
+			return false
+		}
+	}
+	return true
+}
 
 // MethodContext represents a method-scoped context for debug flags
 type MethodContext struct {
@@ -31,7 +138,11 @@ type logOptions struct {
 // WithFlag adds a single additional flag to the log call
 func WithFlag(flag DebugFlag) LogOption {
 	return func(opts *logOptions) {
-		opts.additionalFlags |= flag
+		if opts.additionalFlags == nil {
+			opts.additionalFlags = flag
+		} else {
+			opts.additionalFlags = opts.additionalFlags.Or(flag)
+		}
 	}
 }
 
@@ -39,7 +150,11 @@ func WithFlag(flag DebugFlag) LogOption {
 func WithFlags(flags ...DebugFlag) LogOption {
 	return func(opts *logOptions) {
 		for _, flag := range flags {
-			opts.additionalFlags |= flag
+			if opts.additionalFlags == nil {
+				opts.additionalFlags = flag
+			} else {
+				opts.additionalFlags = opts.additionalFlags.Or(flag)
+			}
 		}
 	}
 }
@@ -102,14 +217,20 @@ func (mc *MethodContext) Error(msg interface{}, opts ...LogOption) {
 func (mc *MethodContext) logWithOptions(defaultSeverity Severity, msg interface{}, opts ...LogOption) {
 	// Parse options
 	options := &logOptions{
-		severity: defaultSeverity,
+		severity:        defaultSeverity,
+		additionalFlags: nil, // Initialize as nil (empty slice)
 	}
 	for _, opt := range opts {
 		opt(options)
 	}
 
 	// Combine method context flags with additional flags
-	combinedFlags := mc.flags | options.additionalFlags
+	var combinedFlags DebugFlag
+	if options.additionalFlags == nil || len(options.additionalFlags) == 0 {
+		combinedFlags = mc.flags
+	} else {
+		combinedFlags = mc.flags.Or(options.additionalFlags)
+	}
 
 	// Format message
 	var message string
@@ -191,7 +312,7 @@ type DebugManager struct {
 	mu                   sync.RWMutex
 	parser               FlagParser
 	flagMap              map[string]DebugFlag
-	pathMap              map[DebugFlag]string
+	flagDefinitions      []FlagDefinition // Store all flag definitions for path lookup
 	allFlags             []DebugFlag
 	enabledFlags         DebugFlag
 	pathSeverityFilters  []PathSeverityFilter
@@ -202,29 +323,29 @@ type DebugManager struct {
 // NewDebugManager creates a new debug manager with the specified parser
 func NewDebugManager(parser FlagParser) *DebugManager {
 	return &DebugManager{
-		parser:  parser,
-		flagMap: make(map[string]DebugFlag),
-		pathMap: make(map[DebugFlag]string),
+		parser:          parser,
+		flagMap:         make(map[string]DebugFlag),
+		flagDefinitions: make([]FlagDefinition, 0),
 	}
 }
 
 // NewDebugManagerWithSlog creates a new debug manager with slog integration
 func NewDebugManagerWithSlog(parser FlagParser) *DebugManager {
 	return &DebugManager{
-		parser:  parser,
-		flagMap: make(map[string]DebugFlag),
-		pathMap: make(map[DebugFlag]string),
-		logger:  slog.Default(),
+		parser:          parser,
+		flagMap:         make(map[string]DebugFlag),
+		flagDefinitions: make([]FlagDefinition, 0),
+		logger:          slog.Default(),
 	}
 }
 
 // NewDebugManagerWithSlogHandler creates a new debug manager with a custom slog handler
 func NewDebugManagerWithSlogHandler(parser FlagParser, handler slog.Handler) *DebugManager {
 	return &DebugManager{
-		parser:  parser,
-		flagMap: make(map[string]DebugFlag),
-		pathMap: make(map[DebugFlag]string),
-		logger:  slog.New(handler),
+		parser:          parser,
+		flagMap:         make(map[string]DebugFlag),
+		flagDefinitions: make([]FlagDefinition, 0),
+		logger:          slog.New(handler),
 	}
 }
 
@@ -235,7 +356,7 @@ func (dm *DebugManager) RegisterFlags(definitions []FlagDefinition) {
 
 	for _, def := range definitions {
 		dm.flagMap[def.Name] = def.Flag
-		dm.pathMap[def.Flag] = def.Path
+		dm.flagDefinitions = append(dm.flagDefinitions, def)
 		dm.allFlags = append(dm.allFlags, def.Flag)
 	}
 }
@@ -252,8 +373,12 @@ func (dm *DebugManager) SetFlags(flags string) error {
 	// Clear existing path severity filters
 	dm.pathSeverityFilters = []PathSeverityFilter{}
 
+	// Note: pathMap is no longer used since slices can't be map keys.
+	// Parsers should use flagMap keys (which are paths) for glob pattern matching instead.
+	// We pass nil for backward compatibility with the interface.
+
 	// Use the configured parser to parse flags
-	enabledFlags, pathFilters, err := dm.parser.ParseFlags(flags, dm.flagMap, dm.pathMap)
+	enabledFlags, pathFilters, err := dm.parser.ParseFlags(flags, dm.flagMap, nil)
 	if err != nil {
 		return err
 	}
@@ -267,7 +392,7 @@ func (dm *DebugManager) SetFlags(flags string) error {
 func (dm *DebugManager) IsEnabled(flag DebugFlag) bool {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
-	return dm.enabledFlags&flag != 0
+	return dm.enabledFlags.HasFlag(flag)
 }
 
 // IsEnabledByName checks if a flag is enabled by name
@@ -276,7 +401,7 @@ func (dm *DebugManager) IsEnabledByName(name string) bool {
 	defer dm.mu.RUnlock()
 
 	if flag, exists := dm.flagMap[name]; exists {
-		return dm.enabledFlags&flag != 0
+		return dm.enabledFlags.HasFlag(flag)
 	}
 	return false
 }
@@ -293,7 +418,7 @@ func (dm *DebugManager) LogWithMethodContext(methodFlags DebugFlag, flag DebugFl
 
 // LogWithSeverity writes a debug message with severity level
 func (dm *DebugManager) LogWithSeverity(flag DebugFlag, severity Severity, contextStr string, format string, args ...interface{}) {
-	if dm.shouldLog(0, flag, severity) {
+	if dm.shouldLog(nil, flag, severity) {
 		message := fmt.Sprintf(format, args...)
 		path := dm.getPath(flag)
 
@@ -394,9 +519,9 @@ func (dm *DebugManager) shouldLog(methodFlags DebugFlag, flag DebugFlag, severit
 	defer dm.mu.RUnlock()
 
 	// Check if the current flag is enabled
-	if dm.enabledFlags&flag != 0 {
+	if dm.enabledFlags.HasFlag(flag) {
 		// Check severity filters
-		path := dm.pathMap[flag]
+		path := dm.getPath(flag)
 		if dm.shouldLogWithPathSeverity(path, severity) {
 			return true
 		}
@@ -407,9 +532,9 @@ func (dm *DebugManager) shouldLog(methodFlags DebugFlag, flag DebugFlag, severit
 	}
 
 	// Check if any method context flags are enabled (inheritance)
-	if methodFlags != 0 && dm.enabledFlags&methodFlags != 0 {
+	if !methodFlags.IsZero() && dm.enabledFlags.HasFlag(methodFlags) {
 		// Check severity filters
-		path := dm.pathMap[flag]
+		path := dm.getPath(flag)
 		if dm.shouldLogWithPathSeverity(path, severity) {
 			return true
 		}
@@ -478,26 +603,21 @@ func (dm *DebugManager) matchesGlob(path, pattern string) bool {
 
 // getPath returns the path string for the given flag
 func (dm *DebugManager) getPath(flag DebugFlag) string {
-	path := dm.pathMap[flag]
-	if path == "" {
-		path = "unknown"
+	// Search through flag definitions to find a matching flag
+	for _, def := range dm.flagDefinitions {
+		if flag.HasFlag(def.Flag) {
+			return def.Path
+		}
 	}
-	return path
+	return "unknown"
 }
 
 // getPathForCombinedFlags returns the path string for combined flags
 func (dm *DebugManager) getPathForCombinedFlags(combinedFlags DebugFlag) string {
-	// If it's a single flag, use the regular getPath
-	if path := dm.pathMap[combinedFlags]; path != "" {
-		return path
-	}
-
 	// For combined flags, find the first matching flag and return its path
-	for _, definedFlag := range dm.allFlags {
-		if combinedFlags&definedFlag != 0 {
-			if path := dm.pathMap[definedFlag]; path != "" {
-				return path
-			}
+	for _, def := range dm.flagDefinitions {
+		if combinedFlags.HasFlag(def.Flag) {
+			return def.Path
 		}
 	}
 
