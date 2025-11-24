@@ -219,38 +219,183 @@ if dm.IsEnabled("api.v1.user.create") {   // Uses path tree (O(1) to O(depth))
 4. **Backward compatible**: Existing code using bitflags continues to work
 5. **Natural evolution**: Services can register flags in order of importance
 
-### Solution 3: Multi-Word Bitflags
+### Solution 3: Multi-Word Bitflags with Global Registry (Alternative/Recommended)
 
-Extend to multiple uint64 words for more flags.
+Extend to multiple uint64 words for unlimited flags, with a global registry mapping path names to flag numbers. Reserve the first word (first 64 flags) for the most common flags globally.
 
 #### Architecture
 
 ```go
-type MultiWordFlag struct {
-    words []uint64  // Each word = 64 flags
+type MultiWordFlagManager struct {
+    // Multi-word bitflags (each word = 64 flags)
+    enabledFlags []uint64  // Dynamic array, grows as needed
+    
+    // Global registry: path name -> flag number
+    pathToFlag   map[string]int  // "api.v1.auth.login" -> 42
+    flagToPath   map[int]string // 42 -> "api.v1.auth.login" (reverse lookup)
+    
+    // Reserved first word for common flags
+    commonFlags  map[string]int  // Common flags (0-63) reserved globally
+    nextFlagID   int             // Next available flag ID (starts at 64)
+    
+    // Configuration
+    maxCommonFlags int           // Max common flags (default: 64)
 }
 
-// Example: 128 flags = 2 words, 256 flags = 4 words, etc.
+// Global registry (shared across all services)
+var globalFlagRegistry = &MultiWordFlagManager{
+    pathToFlag: make(map[string]int),
+    flagToPath: make(map[int]string),
+    enabledFlags: make([]uint64, 1), // Start with 1 word (64 flags)
+    nextFlagID: 64,                   // Common flags are 0-63
+    maxCommonFlags: 64,
+}
 ```
 
 #### Evaluation Strategy
 
-- Check which word contains the flag: `wordIndex = flagIndex / 64`
-- Use bitwise operations on that word: `words[wordIndex] & (1 << (flagIndex % 64))`
+```go
+func (m *MultiWordFlagManager) IsEnabled(path string) bool {
+    // Look up flag number from global registry
+    flagID, exists := m.pathToFlag[path]
+    if !exists {
+        return false  // Path not registered
+    }
+    
+    // Calculate word index and bit position
+    wordIndex := flagID / 64
+    bitPos := flagID % 64
+    
+    // Ensure we have enough words
+    if wordIndex >= len(m.enabledFlags) {
+        return false  // Flag beyond current allocation
+    }
+    
+    // O(1) bitwise check
+    return m.enabledFlags[wordIndex] & (1 << bitPos) != 0
+}
+```
+
+#### Registration Strategy
+
+```go
+func RegisterPath(path string, isCommon bool) int {
+    // Check if already registered
+    if flagID, exists := globalFlagRegistry.pathToFlag[path]; exists {
+        return flagID
+    }
+    
+    var flagID int
+    if isCommon && len(globalFlagRegistry.commonFlags) < globalFlagRegistry.maxCommonFlags {
+        // Assign to common flags (0-63)
+        flagID = len(globalFlagRegistry.commonFlags)
+        globalFlagRegistry.commonFlags[path] = flagID
+    } else {
+        // Assign to extended flags (64+)
+        flagID = globalFlagRegistry.nextFlagID
+        globalFlagRegistry.nextFlagID++
+        
+        // Grow enabledFlags array if needed
+        wordsNeeded := (flagID / 64) + 1
+        if wordsNeeded > len(globalFlagRegistry.enabledFlags) {
+            // Grow array
+            newFlags := make([]uint64, wordsNeeded)
+            copy(newFlags, globalFlagRegistry.enabledFlags)
+            globalFlagRegistry.enabledFlags = newFlags
+        }
+    }
+    
+    // Register in global maps
+    globalFlagRegistry.pathToFlag[path] = flagID
+    globalFlagRegistry.flagToPath[flagID] = path
+    
+    return flagID
+}
+```
 
 #### Performance Characteristics
 
-- **Evaluation**: O(1) - still fast, just one extra array index
-- **Memory**: Linear growth (64 flags per word)
-- **Scalability**: Can scale to thousands of flags
+- **Evaluation**: Pure O(1) - one map lookup + one array index + one bitwise operation
+- **Memory**: Linear growth (64 flags per word, ~8 bytes per word)
+- **Scalability**: Can scale to millions of flags (e.g., 1M flags = ~125KB memory)
+- **Consistency**: Same performance for all flags (no fast/slow path distinction)
+- **Global optimization**: First 64 flags reserved for most common flags across all services
+
+#### Benefits
+
+1. **Pure O(1) performance** - No path tree traversal, no hierarchical checks
+2. **Consistent performance** - All flags evaluated the same way
+3. **Simple implementation** - Just extends current bitflag system
+4. **Global optimization** - First 64 flags reserved for most common paths
+5. **Memory efficient** - Only allocates words as needed
+6. **Unlimited scalability** - Can handle millions of flags
 
 #### Limitations
 
-- Still requires pre-registration of all flags
-- Less flexible than path-based system
-- Doesn't leverage hierarchical structure
+1. **Pre-registration required** - All flags must be registered before use
+2. **Global registry** - Shared across all services (could be a bottleneck for registration)
+3. **No dynamic patterns** - Can't add new flags at runtime easily
+4. **Memory allocation** - Array grows dynamically (but very efficient)
 
-## Recommended Approach: Hybrid Bitflag + Path System
+#### Comparison with Hybrid Approach
+
+| Aspect | Multi-Word Bitflags | Hybrid (Bitflag + Path) |
+|--------|---------------------|-------------------------|
+| **Performance** | Pure O(1) for all | O(1) for common, O(1)-O(depth) for extended |
+| **Consistency** | Same for all flags | Two different code paths |
+| **Scalability** | Unlimited (millions) | Unlimited (millions) |
+| **Flexibility** | Pre-registration required | Dynamic registration |
+| **Complexity** | Simple (extend current) | More complex (two systems) |
+| **Memory** | ~8 bytes per 64 flags | Map + tree overhead |
+| **Global optimization** | First 64 reserved globally | First 64 per service |
+
+#### Recommendation
+
+**Multi-word bitflags with global registry** is likely the better approach because:
+1. **Simpler implementation** - Just extends current bitflag system
+2. **Consistent performance** - No fast/slow path distinction
+3. **Pure O(1)** - No path tree traversal overhead
+4. **Global optimization** - First 64 flags reserved for most common paths across all services
+5. **Proven pattern** - Similar to how many systems handle large flag sets
+
+The main trade-off is requiring pre-registration, but this is acceptable for a debug flag system where flags are typically registered at startup.
+
+## Recommended Approach: Multi-Word Bitflags with Global Registry
+
+After analysis, **multi-word bitflags with global registry** is the optimal solution:
+
+### Why Multi-Word Bitflags?
+
+1. **Pure O(1) performance** for all flags (no path tree traversal, no hierarchical checks)
+2. **Consistent evaluation** - same code path for all flags (no fast/slow path distinction)
+3. **Simple implementation** - just extends current bitflag system (minimal changes)
+4. **Global optimization** - first 64 flags (word 0) reserved for most common paths across all services
+5. **Unlimited scalability** - can handle millions of flags efficiently (e.g., 1M flags = ~125KB memory)
+6. **Memory efficient** - only allocates words as needed (grows dynamically)
+7. **Proven pattern** - similar to how many systems handle large flag sets
+
+### Key Design Decisions
+
+1. **Global Registry**: Single registry shared across all services maps path names to flag IDs
+   - Enables global optimization (first 64 flags for most common paths)
+   - Consistent flag IDs across services
+   - Simple lookup: `path -> flagID -> wordIndex + bitPos`
+
+2. **Reserved First Word**: Flags 0-63 (word 0) reserved for most common flags globally
+   - Services register their most common flags first
+   - These get the fastest evaluation (word 0, no array growth)
+   - Can be pre-allocated at startup
+
+3. **Dynamic Growth**: Array grows as needed
+   - Start with 1 word (64 flags)
+   - Grow to 2 words (128 flags), 3 words (192 flags), etc.
+   - Memory overhead: ~8 bytes per 64 flags
+
+### Alternative: Hybrid Bitflag + Path System
+
+The hybrid approach (Solution 2) is still viable but has trade-offs:
+- **Pros**: Dynamic registration, service-specific optimization
+- **Cons**: Two code paths, path tree traversal overhead, more complex
 
 ### Why Hybrid?
 
@@ -273,20 +418,26 @@ type MultiWordFlag struct {
 
 ### Implementation Plan
 
-#### Phase 1: Hybrid Core
-- [ ] Implement automatic bitflag assignment for first 64 registered paths
-- [ ] Build path tree for flags beyond 64
-- [ ] Add hierarchical path inheritance for both systems
-- [ ] Implement glob pattern matching with caching (works for both)
-- [ ] Maintain backward compatibility with existing bitflag API
-- [ ] Add transparent evaluation that chooses fastest method
+#### Phase 1: Multi-Word Bitflag Core
+- [ ] Implement global flag registry (path name -> flag number)
+- [ ] Extend DebugFlag to support multi-word arrays
+- [ ] Implement automatic word allocation (grow array as needed)
+- [ ] Reserve first 64 flags (word 0) for common flags globally
+- [ ] Update IsEnabled() to use multi-word bitwise operations
+- [ ] Maintain backward compatibility with existing single-word API
 
-#### Phase 2: Performance Optimization
-- [ ] Optimize path tree lookup (cache frequently accessed paths)
-- [ ] Implement pattern compilation cache
-- [ ] Add hot path optimization (track and optimize most-used paths)
-- [ ] Benchmark bitflag vs path tree performance
-- [ ] Consider dynamic promotion: promote frequently-used path flags to bitflags
+#### Phase 2: Pattern Matching & Optimization
+- [ ] Implement glob pattern matching for multi-word flags
+- [ ] Add pattern compilation cache
+- [ ] Optimize SetFlags() to efficiently enable multiple flags
+- [ ] Add hierarchical path inheritance (check parent paths)
+- [ ] Benchmark performance vs current single-word system
+
+#### Phase 3: Lifecycle Integration
+- [ ] Integrate with lifecycle events library
+- [ ] Add PII awareness using schema annotations
+- [ ] Create unified logging interface
+- [ ] Build developer tooling
 
 #### Phase 3: Lifecycle Integration
 - [ ] Integrate with lifecycle events library
