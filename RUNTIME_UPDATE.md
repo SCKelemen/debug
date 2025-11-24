@@ -1,17 +1,32 @@
-# Runtime Debug Flag Updates
+# Runtime Configuration Management
 
-This document describes how to update debug flags at runtime without restarting services, enabling dynamic debugging of production systems.
+This document describes how to update runtime configuration at runtime without restarting services, enabling dynamic control of:
+- **Debug Flags**: Enable/disable debug logging for specific paths
+- **Lifecycle Logging**: Control lifecycle event emission levels
+- **Feature Flags**: Enable/disable features dynamically
+- **Tracing**: Control OpenTelemetry tracing sampling rates
+- **Metrics**: Enable/disable specific metrics collection
+- **Other Observability**: Log levels, sampling rates, etc.
 
 ## Problem Statement
 
-When debugging production issues, you need to enable debug logging without:
+When debugging production issues or managing runtime behavior, you need to update configuration without:
 - Restarting the service (causes downtime)
 - Redeploying (slow, risky)
 - Changing code (not possible in production)
 
-## Solution: Runtime Flag Updates
+## Unified Runtime Configuration
 
-The debug library supports updating flags at runtime through multiple mechanisms:
+All runtime configuration should be managed through a unified interface that supports:
+1. **HTTP Admin Endpoint** (Recommended)
+2. **gRPC Admin Service**
+3. **Signal Handler** (SIGHUP to reload from file)
+4. **File Watcher** (watch config file for changes)
+5. **Configuration Service** (poll/watch external config)
+
+## Solution: Unified Runtime Configuration
+
+Runtime configuration is managed through a unified admin interface supporting multiple mechanisms:
 
 1. **HTTP Admin Endpoint** (Recommended)
 2. **gRPC Admin Service**
@@ -31,7 +46,7 @@ These methods are thread-safe and can be used for runtime flag management.
 ### 1. HTTP Admin Endpoint
 
 ```go
-// admin/debug_handler.go
+// admin/runtime_config_handler.go
 package admin
 
 import (
@@ -39,77 +54,308 @@ import (
 	"net/http"
 	
 	debug "github.com/SCKelemen/debug"
+	"github.com/SCKelemen/lifecycle"
 )
 
-// DebugAdminHandler provides HTTP endpoints for runtime debug flag management
-type DebugAdminHandler struct {
-	debugManager *debug.DebugManager
+// RuntimeConfig represents all runtime configuration
+type RuntimeConfig struct {
+	DebugFlags      *DebugFlagsConfig      `json:"debug_flags,omitempty"`
+	LifecycleLogging *LifecycleLoggingConfig `json:"lifecycle_logging,omitempty"`
+	FeatureFlags    *FeatureFlagsConfig    `json:"feature_flags,omitempty"`
+	Tracing         *TracingConfig         `json:"tracing,omitempty"`
+	Metrics         *MetricsConfig         `json:"metrics,omitempty"`
 }
 
-func NewDebugAdminHandler(dm *debug.DebugManager) *DebugAdminHandler {
-	return &DebugAdminHandler{debugManager: dm}
+// DebugFlagsConfig represents debug flag configuration
+type DebugFlagsConfig struct {
+	Enabled string `json:"enabled"` // Flags string (e.g., "http.request|db.query")
+}
+
+// LifecycleLoggingConfig represents lifecycle event logging configuration
+type LifecycleLoggingConfig struct {
+	Level              string            `json:"level"`                // "all", "errors", "none"
+	EventTypes         []string          `json:"event_types,omitempty"` // Specific event types to log
+	SamplingRate       float64           `json:"sampling_rate,omitempty"` // 0.0 to 1.0
+	DisablePIIRedaction bool             `json:"disable_pii_redaction,omitempty"` // Dangerous!
+}
+
+// FeatureFlagsConfig represents feature flag configuration
+type FeatureFlagsConfig struct {
+	Flags map[string]bool `json:"flags"` // feature_name -> enabled
+}
+
+// TracingConfig represents OpenTelemetry tracing configuration
+type TracingConfig struct {
+	Enabled      bool    `json:"enabled"`
+	SamplingRate float64 `json:"sampling_rate"` // 0.0 to 1.0
+	MaxSpans     int     `json:"max_spans,omitempty"`
+}
+
+// MetricsConfig represents metrics collection configuration
+type MetricsConfig struct {
+	Enabled      bool     `json:"enabled"`
+	DisableTypes []string `json:"disable_types,omitempty"` // ["counter", "gauge", "histogram"]
+}
+
+// RuntimeConfigHandler provides HTTP endpoints for runtime configuration management
+type RuntimeConfigHandler struct {
+	debugManager    *debug.DebugManager
+	lifecycleProducer *lifecycle.Producer
+	featureFlags    *FeatureFlagManager
+	tracingConfig   *TracingConfigManager
+	metricsConfig   *MetricsConfigManager
+}
+
+func NewRuntimeConfigHandler(
+	dm *debug.DebugManager,
+	producer *lifecycle.Producer,
+	featureFlags *FeatureFlagManager,
+	tracing *TracingConfigManager,
+	metrics *MetricsConfigManager,
+) *RuntimeConfigHandler {
+	return &RuntimeConfigHandler{
+		debugManager:      dm,
+		lifecycleProducer: producer,
+		featureFlags:      featureFlags,
+		tracingConfig:     tracing,
+		metricsConfig:     metrics,
+	}
 }
 
 // RegisterRoutes registers admin routes
-func (h *DebugAdminHandler) RegisterRoutes(mux *http.ServeMux, basePath string) {
-	path := basePath + "/debug"
-	mux.HandleFunc(path+"/flags", h.HandleFlags)        // GET/PUT flags
-	mux.HandleFunc(path+"/flags/enable", h.HandleEnable) // POST enable flags
-	mux.HandleFunc(path+"/flags/disable", h.HandleDisable) // POST disable flags
-	mux.HandleFunc(path+"/flags/list", h.HandleList)    // GET list all flags
+func (h *RuntimeConfigHandler) RegisterRoutes(mux *http.ServeMux, basePath string) {
+	path := basePath + "/runtime"
+	
+	// Unified configuration endpoint
+	mux.HandleFunc(path+"/config", h.HandleConfig)        // GET/PUT all config
+	mux.HandleFunc(path+"/config/debug", h.HandleDebugFlags) // GET/PUT debug flags
+	mux.HandleFunc(path+"/config/lifecycle", h.HandleLifecycle) // GET/PUT lifecycle logging
+	mux.HandleFunc(path+"/config/features", h.HandleFeatureFlags) // GET/PUT feature flags
+	mux.HandleFunc(path+"/config/tracing", h.HandleTracing) // GET/PUT tracing config
+	mux.HandleFunc(path+"/config/metrics", h.HandleMetrics) // GET/PUT metrics config
 }
 
-// HandleFlags handles GET/PUT for debug flags
-func (h *DebugAdminHandler) HandleFlags(w http.ResponseWriter, r *http.Request) {
+// HandleConfig handles GET/PUT for all runtime configuration
+func (h *RuntimeConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		h.getFlags(w, r)
+		h.getConfig(w, r)
 	case http.MethodPut:
-		h.setFlags(w, r)
+		h.setConfig(w, r)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-// getFlags returns current enabled flags
-func (h *DebugAdminHandler) getFlags(w http.ResponseWriter, r *http.Request) {
-	// Get enabled flags (would need to be implemented)
-	enabled := getEnabledFlags(h.debugManager)
+// getConfig returns current runtime configuration
+func (h *RuntimeConfigHandler) getConfig(w http.ResponseWriter, r *http.Request) {
+	config := RuntimeConfig{
+		DebugFlags: &DebugFlagsConfig{
+			Enabled: h.debugManager.GetFlagsString(),
+		},
+		LifecycleLogging: h.getLifecycleConfig(),
+		FeatureFlags:    h.featureFlags.GetConfig(),
+		Tracing:         h.tracingConfig.GetConfig(),
+		Metrics:         h.metricsConfig.GetConfig(),
+	}
 	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
+}
+
+// setConfig updates runtime configuration
+func (h *RuntimeConfigHandler) setConfig(w http.ResponseWriter, r *http.Request) {
+	var config RuntimeConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+	
+	// Update each component
+	if config.DebugFlags != nil {
+		if err := h.debugManager.SetFlags(config.DebugFlags.Enabled); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to set debug flags: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+	
+	if config.LifecycleLogging != nil {
+		if err := h.setLifecycleConfig(config.LifecycleLogging); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to set lifecycle config: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+	
+	if config.FeatureFlags != nil {
+		h.featureFlags.SetConfig(config.FeatureFlags)
+	}
+	
+	if config.Tracing != nil {
+		h.tracingConfig.SetConfig(config.Tracing)
+	}
+	
+	if config.Metrics != nil {
+		h.metricsConfig.SetConfig(config.Metrics)
+	}
+	
+	// Return updated config
+	h.getConfig(w, r)
+}
+
+// HandleDebugFlags handles GET/PUT for debug flags only
+func (h *RuntimeConfigHandler) HandleDebugFlags(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.getDebugFlags(w, r)
+	case http.MethodPut:
+		h.setDebugFlags(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// getDebugFlags returns current debug flags
+func (h *RuntimeConfigHandler) getDebugFlags(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
-		"enabled_flags": enabled,
-		"flags_string":  getFlagsString(h.debugManager), // Current flags string
+		"enabled_flags": h.debugManager.GetEnabledFlags(),
+		"available_flags": h.debugManager.GetAvailableFlags(),
+		"flags_string":  h.debugManager.GetFlagsString(),
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
 
-// setFlags updates debug flags from request body
-func (h *DebugAdminHandler) setFlags(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Flags string `json:"flags"`
-	}
-	
+// setDebugFlags updates debug flags from request body
+func (h *RuntimeConfigHandler) setDebugFlags(w http.ResponseWriter, r *http.Request) {
+	var req DebugFlagsConfig
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
 		return
 	}
 	
 	// Update flags at runtime
-	if err := h.debugManager.SetFlags(req.Flags); err != nil {
+	if err := h.debugManager.SetFlags(req.Enabled); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to set flags: %v", err), http.StatusBadRequest)
 		return
 	}
 	
 	resp := map[string]interface{}{
 		"status":        "success",
-		"enabled_flags": getEnabledFlags(h.debugManager),
-		"flags_string":  req.Flags,
+		"enabled_flags": h.debugManager.GetEnabledFlags(),
+		"flags_string":  req.Enabled,
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// HandleLifecycle handles GET/PUT for lifecycle logging configuration
+func (h *RuntimeConfigHandler) HandleLifecycle(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.getLifecycleConfigHandler(w, r)
+	case http.MethodPut:
+		h.setLifecycleConfigHandler(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *RuntimeConfigHandler) getLifecycleConfigHandler(w http.ResponseWriter, r *http.Request) {
+	config := h.getLifecycleConfig()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
+}
+
+func (h *RuntimeConfigHandler) setLifecycleConfigHandler(w http.ResponseWriter, r *http.Request) {
+	var config LifecycleLoggingConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+	
+	if err := h.setLifecycleConfig(&config); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to set lifecycle config: %v", err), http.StatusBadRequest)
+		return
+	}
+	
+	h.getLifecycleConfigHandler(w, r)
+}
+
+func (h *RuntimeConfigHandler) getLifecycleConfig() *LifecycleLoggingConfig {
+	// Get current lifecycle producer configuration
+	// This would need to be implemented in lifecycle library
+	return &LifecycleLoggingConfig{
+		Level:        "all",
+		SamplingRate: 1.0,
+	}
+}
+
+func (h *RuntimeConfigHandler) setLifecycleConfig(config *LifecycleLoggingConfig) error {
+	// Update lifecycle producer configuration
+	// This would need to be implemented in lifecycle library
+	return nil
+}
+
+// HandleFeatureFlags handles GET/PUT for feature flags
+func (h *RuntimeConfigHandler) HandleFeatureFlags(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.featureFlags.GetConfig())
+	case http.MethodPut:
+		var config FeatureFlagsConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		h.featureFlags.SetConfig(&config)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.featureFlags.GetConfig())
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// HandleTracing handles GET/PUT for tracing configuration
+func (h *RuntimeConfigHandler) HandleTracing(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.tracingConfig.GetConfig())
+	case http.MethodPut:
+		var config TracingConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		h.tracingConfig.SetConfig(&config)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.tracingConfig.GetConfig())
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// HandleMetrics handles GET/PUT for metrics configuration
+func (h *RuntimeConfigHandler) HandleMetrics(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.metricsConfig.GetConfig())
+	case http.MethodPut:
+		var config MetricsConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		h.metricsConfig.SetConfig(&config)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.metricsConfig.GetConfig())
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // HandleEnable enables specific flags (additive)
@@ -537,23 +783,46 @@ echo "http.request|db.query" > /var/run/debug-flags.conf
 func main() {
 	// ... existing initialization ...
 	
-	// Setup admin endpoints for runtime debug flag updates
+	// Initialize runtime configuration managers
+	featureFlagManager := featureflags.NewManager()
+	tracingConfigManager := tracing.NewConfigManager(otelTracerProvider)
+	metricsConfigManager := metrics.NewConfigManager(otelMeterProvider)
+	
+	// Setup admin endpoints for runtime configuration updates
 	adminMux := http.NewServeMux()
-	debugAdminHandler := admin.NewDebugAdminHandler(debugManager)
-	debugAdminHandler.RegisterRoutes(adminMux, "/admin")
+	runtimeConfigHandler := admin.NewRuntimeConfigHandler(
+		debugManager,
+		producer,
+		featureFlagManager,
+		tracingConfigManager,
+		metricsConfigManager,
+	)
+	runtimeConfigHandler.RegisterRoutes(adminMux, "/admin")
 	
 	// Secure admin endpoints with IAM
 	adminHandler := interface.IAMMiddleware(iamEvaluator, map[string]iam.MethodAuthorizationOptions{
-		"PUT:/admin/debug/flags": {
+		"PUT:/admin/runtime/config": {
+			Permission: "admin.runtime.update",
+			Strategy:   "before",
+		},
+		"PUT:/admin/runtime/config/debug": {
 			Permission: "admin.debug.update",
 			Strategy:   "before",
 		},
-		"POST:/admin/debug/flags/enable": {
-			Permission: "admin.debug.update",
+		"PUT:/admin/runtime/config/lifecycle": {
+			Permission: "admin.lifecycle.update",
 			Strategy:   "before",
 		},
-		"POST:/admin/debug/flags/disable": {
-			Permission: "admin.debug.update",
+		"PUT:/admin/runtime/config/features": {
+			Permission: "admin.features.update",
+			Strategy:   "before",
+		},
+		"PUT:/admin/runtime/config/tracing": {
+			Permission: "admin.tracing.update",
+			Strategy:   "before",
+		},
+		"PUT:/admin/runtime/config/metrics": {
+			Permission: "admin.metrics.update",
 			Strategy:   "before",
 		},
 	})(adminMux)
@@ -587,19 +856,31 @@ func main() {
 
 ## Benefits
 
-1. **No Downtime**: Enable debugging without restarting
-2. **Fast Response**: Enable flags in seconds, not minutes
-3. **Selective Debugging**: Enable only what you need
-4. **Production Safe**: Can disable flags immediately if needed
-5. **Audit Trail**: All flag changes are logged
+1. **No Downtime**: Update configuration without restarting
+2. **Fast Response**: Update config in seconds, not minutes
+3. **Selective Control**: Enable/disable specific features independently
+4. **Production Safe**: Can revert changes immediately if needed
+5. **Unified Interface**: Single endpoint for all runtime configuration
+6. **Audit Trail**: All configuration changes are logged
+7. **Resource Management**: Control observability overhead (sampling rates, log levels)
+8. **Feature Management**: Enable/disable features without code changes
 
 ## Best Practices
 
-1. **Default to Off**: Services start with minimal debug flags
-2. **Time-Limited**: Consider auto-disabling flags after a timeout
-3. **Resource Monitoring**: Monitor log volume when enabling flags
-4. **Rollback Plan**: Always have a way to quickly disable flags
-5. **Documentation**: Document which flags are safe for production
+1. **Default to Safe**: Services start with conservative configuration
+   - Minimal debug flags
+   - Error-level lifecycle logging
+   - Low tracing sampling rates
+   - All features disabled by default
+2. **Time-Limited**: Consider auto-reverting configuration after a timeout
+3. **Resource Monitoring**: Monitor resource usage when enabling features
+   - Log volume (lifecycle events)
+   - Trace volume (tracing)
+   - CPU/memory (metrics collection)
+4. **Rollback Plan**: Always have a way to quickly revert changes
+5. **Documentation**: Document which configurations are safe for production
+6. **Gradual Rollout**: Enable features gradually (per service, per region)
+7. **Feature Flags**: Use feature flags for new functionality, not just debugging
 
 ---
 
