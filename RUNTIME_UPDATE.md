@@ -21,12 +21,12 @@ The debug library supports updating flags at runtime through multiple mechanisms
 
 ## Implementation
 
-**Note**: The debug library's `SetFlags()` method is already thread-safe and can be called at runtime. However, we need to add helper methods to:
-- Get current enabled flags as a list
-- Get current flags string
-- Get all available flags
+**Note**: The debug library's `SetFlags()` method is already thread-safe and can be called at runtime. The library includes helper methods:
+- `GetEnabledFlags()` - Returns list of currently enabled flag names
+- `GetAvailableFlags()` - Returns list of all registered flag names
+- `GetFlagsString()` - Returns the current flags string that was last set
 
-These methods would need to be added to the debug library, or implemented as wrappers.
+These methods are thread-safe and can be used for runtime flag management.
 
 ### 1. HTTP Admin Endpoint
 
@@ -275,24 +275,17 @@ func (s *DebugAdminService) DisableFlags(ctx context.Context, req *adminv1.Disab
 	}, nil
 }
 
-// Helper functions (would need to be implemented in debug library)
+// Helper functions (use methods from debug library)
 func getEnabledFlags(dm *debug.DebugManager) []string {
-	// Would iterate through flagMap and check which flags are enabled
-	// This is a placeholder - actual implementation would be in debug library
-	return []string{} // Placeholder
+	return dm.GetEnabledFlags()
 }
 
 func getAvailableFlags(dm *debug.DebugManager) []string {
-	// Would return all registered flag names
-	// This is a placeholder - actual implementation would be in debug library
-	return []string{} // Placeholder
+	return dm.GetAvailableFlags()
 }
 
 func getFlagsString(dm *debug.DebugManager) string {
-	// Would return the current flags string that was last set
-	// This requires storing the flags string in DebugManager
-	// This is a placeholder - actual implementation would be in debug library
-	return "" // Placeholder
+	return dm.GetFlagsString()
 }
 ```
 

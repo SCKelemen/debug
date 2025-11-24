@@ -197,6 +197,7 @@ type DebugManager struct {
 	pathSeverityFilters  []PathSeverityFilter
 	globalSeverityFilter SeverityFilter
 	logger               *slog.Logger
+	currentFlagsString   string // Store current flags string for runtime updates
 }
 
 // NewDebugManager creates a new debug manager with the specified parser
@@ -260,6 +261,7 @@ func (dm *DebugManager) SetFlags(flags string) error {
 
 	dm.enabledFlags = enabledFlags
 	dm.pathSeverityFilters = pathFilters
+	dm.currentFlagsString = flags // Store for runtime queries
 	return nil
 }
 
@@ -509,6 +511,39 @@ func (dm *DebugManager) IsSlogEnabled() bool {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
 	return dm.logger != nil
+}
+
+// GetEnabledFlags returns a list of enabled flag names
+func (dm *DebugManager) GetEnabledFlags() []string {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+	
+	var enabled []string
+	for name, flag := range dm.flagMap {
+		if dm.enabledFlags&flag != 0 {
+			enabled = append(enabled, name)
+		}
+	}
+	return enabled
+}
+
+// GetAvailableFlags returns a list of all available flag names
+func (dm *DebugManager) GetAvailableFlags() []string {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+	
+	var available []string
+	for name := range dm.flagMap {
+		available = append(available, name)
+	}
+	return available
+}
+
+// GetFlagsString returns the current flags string that was last set
+func (dm *DebugManager) GetFlagsString() string {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+	return dm.currentFlagsString
 }
 
 // severityToSlogLevel converts our Severity to slog.Level
