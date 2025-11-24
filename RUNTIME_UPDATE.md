@@ -6,6 +6,8 @@ This document describes how to update runtime configuration at runtime without r
 - **Feature Flags**: Enable/disable features dynamically
 - **Tracing**: Control OpenTelemetry tracing sampling rates
 - **Metrics**: Enable/disable specific metrics collection
+- **Authentication**: Control token validation, refresh intervals, and auth methods
+- **Authorization**: Control IAM policy caching, exemption verification, and permission checks
 - **Other Observability**: Log levels, sampling rates, etc.
 
 ## Problem Statement
@@ -64,6 +66,8 @@ type RuntimeConfig struct {
 	FeatureFlags    *FeatureFlagsConfig    `json:"feature_flags,omitempty"`
 	Tracing         *TracingConfig         `json:"tracing,omitempty"`
 	Metrics         *MetricsConfig         `json:"metrics,omitempty"`
+	Authentication  *AuthenticationConfig  `json:"authentication,omitempty"`
+	Authorization   *AuthorizationConfig  `json:"authorization,omitempty"`
 }
 
 // DebugFlagsConfig represents debug flag configuration
@@ -97,13 +101,86 @@ type MetricsConfig struct {
 	DisableTypes []string `json:"disable_types,omitempty"` // ["counter", "gauge", "histogram"]
 }
 
+// AuthenticationConfig represents authentication configuration
+type AuthenticationConfig struct {
+	Enabled              bool              `json:"enabled"`                // Enable/disable authentication
+	TokenValidation      *TokenValidationConfig `json:"token_validation,omitempty"`
+	RefreshInterval      *int               `json:"refresh_interval,omitempty"` // Seconds
+	SessionTimeout       *int               `json:"session_timeout,omitempty"`  // Seconds
+	Methods              *AuthMethodsConfig `json:"methods,omitempty"`
+	AllowPublicEndpoints bool               `json:"allow_public_endpoints,omitempty"` // Allow endpoints without auth
+}
+
+// TokenValidationConfig represents token validation settings
+type TokenValidationConfig struct {
+	Enabled           bool     `json:"enabled"`
+	Issuer            string   `json:"issuer,omitempty"`            // JWT issuer
+	Audience          []string `json:"audience,omitempty"`         // JWT audience
+	SkipExpiryCheck  bool     `json:"skip_expiry_check,omitempty"` // Dangerous!
+	SkipSignatureCheck bool   `json:"skip_signature_check,omitempty"` // Dangerous!
+	ClockSkew         int      `json:"clock_skew,omitempty"`       // Seconds
+}
+
+// AuthMethodsConfig represents enabled authentication methods
+type AuthMethodsConfig struct {
+	OAuth2    bool `json:"oauth2"`
+	WebAuthn  bool `json:"webauthn"`
+	APIKey    bool `json:"api_key"`
+	BasicAuth bool `json:"basic_auth"`
+}
+
+// AuthorizationConfig represents authorization (IAM) configuration
+type AuthorizationConfig struct {
+	Enabled              bool                    `json:"enabled"`                // Enable/disable authorization
+	PolicyCache          *PolicyCacheConfig      `json:"policy_cache,omitempty"`
+	ExemptionVerification *ExemptionConfig       `json:"exemption_verification,omitempty"`
+	CEL                  *CELConfig              `json:"cel,omitempty"`
+	Streaming            *StreamingConfig        `json:"streaming,omitempty"`
+	AllowPublicMethods   bool                    `json:"allow_public_methods,omitempty"` // Allow methods without authz
+}
+
+// PolicyCacheConfig represents IAM policy cache settings
+type PolicyCacheConfig struct {
+	Enabled            bool `json:"enabled"`
+	RefreshInterval    int  `json:"refresh_interval"`    // Seconds (default: 180)
+	MaxStaleness       int  `json:"max_staleness"`       // Seconds (default: 180, SLA)
+	RequestSnapshot    bool `json:"request_snapshot"`    // Request full snapshot from IAM service
+	CacheSize          int  `json:"cache_size,omitempty"` // Max number of cached policies
+}
+
+// ExemptionConfig represents GRC exemption verification settings
+type ExemptionConfig struct {
+	Enabled            bool `json:"enabled"`
+	VerifySignature    bool `json:"verify_signature"`    // Verify cryptographic signature
+	CheckExpiry        bool `json:"check_expiry"`        // Check exemption expiry
+	AllowExpired       bool `json:"allow_expired,omitempty"` // Allow expired exemptions (dangerous!)
+	CacheExpiry        int  `json:"cache_expiry,omitempty"`  // Cache exemption verification (seconds)
+}
+
+// CELConfig represents CEL expression evaluation settings
+type CELConfig struct {
+	Enabled         bool `json:"enabled"`
+	MaxExpressionSize int `json:"max_expression_size,omitempty"` // Max characters
+	Timeout         int  `json:"timeout,omitempty"`              // Milliseconds
+	CacheResults    bool `json:"cache_results,omitempty"`         // Cache CEL evaluation results
+}
+
+// StreamingConfig represents IAM policy streaming settings
+type StreamingConfig struct {
+	Enabled            bool `json:"enabled"`
+	ReconnectInterval  int  `json:"reconnect_interval,omitempty"` // Seconds
+	RequestSnapshotOnError bool `json:"request_snapshot_on_error"` // Request snapshot on stream error
+}
+
 // RuntimeConfigHandler provides HTTP endpoints for runtime configuration management
 type RuntimeConfigHandler struct {
-	debugManager    *debug.DebugManager
+	debugManager      *debug.DebugManager
 	lifecycleProducer *lifecycle.Producer
-	featureFlags    *FeatureFlagManager
-	tracingConfig   *TracingConfigManager
-	metricsConfig   *MetricsConfigManager
+	featureFlags      *FeatureFlagManager
+	tracingConfig     *TracingConfigManager
+	metricsConfig     *MetricsConfigManager
+	authConfig        *AuthenticationConfigManager
+	authzConfig       *AuthorizationConfigManager
 }
 
 func NewRuntimeConfigHandler(
@@ -112,6 +189,8 @@ func NewRuntimeConfigHandler(
 	featureFlags *FeatureFlagManager,
 	tracing *TracingConfigManager,
 	metrics *MetricsConfigManager,
+	auth *AuthenticationConfigManager,
+	authz *AuthorizationConfigManager,
 ) *RuntimeConfigHandler {
 	return &RuntimeConfigHandler{
 		debugManager:      dm,
@@ -119,6 +198,8 @@ func NewRuntimeConfigHandler(
 		featureFlags:      featureFlags,
 		tracingConfig:     tracing,
 		metricsConfig:     metrics,
+		authConfig:        auth,
+		authzConfig:       authz,
 	}
 }
 
@@ -133,6 +214,8 @@ func (h *RuntimeConfigHandler) RegisterRoutes(mux *http.ServeMux, basePath strin
 	mux.HandleFunc(path+"/config/features", h.HandleFeatureFlags) // GET/PUT feature flags
 	mux.HandleFunc(path+"/config/tracing", h.HandleTracing) // GET/PUT tracing config
 	mux.HandleFunc(path+"/config/metrics", h.HandleMetrics) // GET/PUT metrics config
+	mux.HandleFunc(path+"/config/auth", h.HandleAuthentication) // GET/PUT authentication config
+	mux.HandleFunc(path+"/config/authz", h.HandleAuthorization) // GET/PUT authorization config
 }
 
 // HandleConfig handles GET/PUT for all runtime configuration
@@ -157,6 +240,8 @@ func (h *RuntimeConfigHandler) getConfig(w http.ResponseWriter, r *http.Request)
 		FeatureFlags:    h.featureFlags.GetConfig(),
 		Tracing:         h.tracingConfig.GetConfig(),
 		Metrics:         h.metricsConfig.GetConfig(),
+		Authentication:  h.authConfig.GetConfig(),
+		Authorization:   h.authzConfig.GetConfig(),
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -196,6 +281,20 @@ func (h *RuntimeConfigHandler) setConfig(w http.ResponseWriter, r *http.Request)
 	
 	if config.Metrics != nil {
 		h.metricsConfig.SetConfig(config.Metrics)
+	}
+	
+	if config.Authentication != nil {
+		if err := h.authConfig.SetConfig(config.Authentication); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to set authentication config: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+	
+	if config.Authorization != nil {
+		if err := h.authzConfig.SetConfig(config.Authorization); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to set authorization config: %v", err), http.StatusBadRequest)
+			return
+		}
 	}
 	
 	// Return updated config
@@ -353,6 +452,52 @@ func (h *RuntimeConfigHandler) HandleMetrics(w http.ResponseWriter, r *http.Requ
 		h.metricsConfig.SetConfig(&config)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(h.metricsConfig.GetConfig())
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// HandleAuthentication handles GET/PUT for authentication configuration
+func (h *RuntimeConfigHandler) HandleAuthentication(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.authConfig.GetConfig())
+	case http.MethodPut:
+		var config AuthenticationConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := h.authConfig.SetConfig(&config); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to set authentication config: %v", err), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.authConfig.GetConfig())
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// HandleAuthorization handles GET/PUT for authorization configuration
+func (h *RuntimeConfigHandler) HandleAuthorization(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.authzConfig.GetConfig())
+	case http.MethodPut:
+		var config AuthorizationConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := h.authzConfig.SetConfig(&config); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to set authorization config: %v", err), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.authzConfig.GetConfig())
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -796,6 +941,8 @@ func main() {
 		featureFlagManager,
 		tracingConfigManager,
 		metricsConfigManager,
+		authConfigManager,
+		authzConfigManager,
 	)
 	runtimeConfigHandler.RegisterRoutes(adminMux, "/admin")
 	
@@ -823,6 +970,14 @@ func main() {
 		},
 		"PUT:/admin/runtime/config/metrics": {
 			Permission: "admin.metrics.update",
+			Strategy:   "before",
+		},
+		"PUT:/admin/runtime/config/auth": {
+			Permission: "admin.auth.update",
+			Strategy:   "before",
+		},
+		"PUT:/admin/runtime/config/authz": {
+			Permission: "admin.authz.update",
 			Strategy:   "before",
 		},
 	})(adminMux)
@@ -872,15 +1027,25 @@ func main() {
    - Error-level lifecycle logging
    - Low tracing sampling rates
    - All features disabled by default
+   - Authentication enabled with strict validation
+   - Authorization enabled with policy caching
 2. **Time-Limited**: Consider auto-reverting configuration after a timeout
 3. **Resource Monitoring**: Monitor resource usage when enabling features
    - Log volume (lifecycle events)
    - Trace volume (tracing)
    - CPU/memory (metrics collection)
+   - Policy cache size (authorization)
+   - Token validation overhead (authentication)
 4. **Rollback Plan**: Always have a way to quickly revert changes
 5. **Documentation**: Document which configurations are safe for production
 6. **Gradual Rollout**: Enable features gradually (per service, per region)
 7. **Feature Flags**: Use feature flags for new functionality, not just debugging
+8. **Security Considerations**: 
+   - Never disable authentication/authorization in production
+   - `skip_expiry_check` and `skip_signature_check` are dangerous and should only be used for debugging
+   - `allow_expired` exemptions should be used with extreme caution
+   - Always verify exemption signatures in production
+   - Monitor authorization failures and policy cache staleness
 
 ---
 
