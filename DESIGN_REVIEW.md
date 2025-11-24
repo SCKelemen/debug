@@ -94,50 +94,130 @@ type PathTree struct {
 - **Worst case**: O(depth) for hierarchical checks (typically 3-5 levels)
 - **Pattern matching**: O(1) after cache warmup, O(n) first time (n = number of paths)
 
-#### Example Usage
+#### Example Usage (Old Path-Based Only - For Reference)
 
 ```go
-// Register paths (no bitflags needed)
-dm.RegisterPath("api.v1.auth.login")
-dm.RegisterPath("api.v1.auth.logout")
-dm.RegisterPath("db.user.query")
+// This was the pure path-based approach
+// Now we use hybrid: first 64 get bitflags automatically
+dm.RegisterPath("api.v1.auth.login")      // Would use path tree
+dm.RegisterPath("api.v1.auth.logout")    // Would use path tree
+dm.RegisterPath("db.user.query")          // Would use path tree
 
 // Enable via patterns (same API as before)
 dm.SetFlags("api.v1.*|db.user.*")
 
-// Check if enabled (still fast)
+// Check if enabled (path tree lookup)
 if dm.IsEnabled("api.v1.auth.login") {
     // Log
 }
 ```
 
-### Solution 2: Hybrid Bitflag + Path System
+### Solution 2: Hybrid Bitflag + Path System (Recommended)
 
-Keep bitflags for common flags (< 64), use path-based for everything else.
+Automatically use bitflags for the most common flags in each service, with path-based lookup for everything else. All flags maintain dot-pathed names - the manager transparently handles the optimization.
 
 #### Architecture
 
 ```go
 type HybridFlagManager struct {
-    // Bitflags for first 64 common flags (fast path)
-    commonFlags    DebugFlag  // uint64
-    enabledCommon  DebugFlag  // uint64
+    // Bitflags for common flags (first 64 registered per service)
+    commonFlags    map[string]DebugFlag  // path -> bitflag
+    bitflagMap     map[DebugFlag]string  // bitflag -> path (reverse lookup)
+    enabledFlags   DebugFlag             // uint64 - enabled common flags
     
-    // Path-based for everything else
-    pathManager    *PathFlagManager
+    // Path-based for uncommon flags (beyond first 64)
+    pathTree       *PathTree             // Cached tree for fast lookup
+    enabledPaths   map[string]bool       // Fast lookup for enabled paths
+    
+    // Automatic assignment tracking
+    nextBitFlag    int                   // Next available bitflag (0-63)
+    maxCommonFlags int                   // Max common flags (default: 64)
 }
 ```
 
+#### Automatic Flag Assignment
+
+The manager automatically assigns bitflags to the first N registered flags (default: 64) based on registration order. This means:
+- **First 64 registered paths** → Get bitflags automatically (O(1) evaluation)
+- **All other paths** → Use cached tree lookup (O(1) to O(depth))
+- **Same API** → Developers don't need to think about which is which
+
+**Registration Strategy:**
+```go
+func (h *HybridFlagManager) RegisterPath(path string) {
+    if h.nextBitFlag < h.maxCommonFlags {
+        // Assign bitflag to this path
+        flag := DebugFlag(1 << h.nextBitFlag)
+        h.commonFlags[path] = flag
+        h.bitflagMap[flag] = path
+        h.nextBitFlag++
+    } else {
+        // Add to path tree
+        h.pathTree.Add(path)
+    }
+}
+```
+
+**Cached Tree Lookup:**
+The path tree is built once and cached, providing fast hierarchical lookups:
+- Direct path match: O(1) map lookup
+- Hierarchical inheritance: O(depth) tree traversal (typically 3-5 levels)
+- Pattern matching: O(1) after compilation, cached for reuse
+
 #### Evaluation Strategy
 
-1. Check if flag is in common set (< 64): Use bitwise operations (O(1))
-2. Otherwise: Use path-based lookup (O(1) to O(depth))
+```go
+func (h *HybridFlagManager) IsEnabled(path string) bool {
+    // Fast path: Check if path has a bitflag
+    if flag, hasBitFlag := h.commonFlags[path]; hasBitFlag {
+        return h.enabledFlags & flag != 0  // O(1) bitwise operation
+    }
+    
+    // Slow path: Use cached tree lookup
+    return h.pathTree.IsEnabled(path)  // O(1) to O(depth)
+}
+```
 
 #### Performance Characteristics
 
-- **Common flags**: O(1) bitwise operations (same as current)
-- **Extended flags**: O(1) to O(depth) path lookup
-- **Backward compatible**: Existing code using bitflags continues to work
+- **Common flags (first 64)**: O(1) bitwise operations (same as current system)
+- **Extended flags**: O(1) to O(depth) cached tree lookup
+- **Transparent optimization**: Developers use same API, manager handles optimization
+- **Backward compatible**: Existing bitflag code continues to work
+- **Service-specific**: Each service can have its own 64 common flags
+
+#### Example Usage
+
+```go
+// Register flags - first 64 automatically get bitflags
+dm.RegisterPath("api.v1.auth.login")      // Gets bitflag 1 << 0
+dm.RegisterPath("api.v1.auth.logout")     // Gets bitflag 1 << 1
+dm.RegisterPath("db.user.query")          // Gets bitflag 1 << 2
+// ... up to 64 flags get bitflags
+
+dm.RegisterPath("api.v1.user.create")      // Flag 65+ uses path tree
+dm.RegisterPath("api.v1.user.update")     // Flag 65+ uses path tree
+
+// Enable via patterns (works for both)
+dm.SetFlags("api.v1.*|db.user.*")
+
+// Check if enabled (manager automatically uses fastest method)
+if dm.IsEnabled("api.v1.auth.login") {    // Uses bitflag (O(1))
+    // Log
+}
+
+if dm.IsEnabled("api.v1.user.create") {   // Uses path tree (O(1) to O(depth))
+    // Log
+}
+```
+
+#### Benefits
+
+1. **Best of both worlds**: Fast bitflags for hot paths, unlimited scalability for everything else
+2. **Zero developer overhead**: Same API, automatic optimization
+3. **Service-optimized**: Each service's most common flags get bitflags
+4. **Backward compatible**: Existing code using bitflags continues to work
+5. **Natural evolution**: Services can register flags in order of importance
 
 ### Solution 3: Multi-Word Bitflags
 
@@ -170,36 +250,43 @@ type MultiWordFlag struct {
 - Less flexible than path-based system
 - Doesn't leverage hierarchical structure
 
-## Recommended Approach: Path-Based System
+## Recommended Approach: Hybrid Bitflag + Path System
 
-### Why Path-Based?
+### Why Hybrid?
 
-1. **Unlimited scalability** - No hard limit on number of flags
-2. **Natural hierarchy** - Dot notation paths are already hierarchical
-3. **Flexible registration** - Flags can be registered dynamically
-4. **Pattern-friendly** - Glob patterns work naturally with paths
-5. **Future-proof** - Easy to extend with new features
+1. **Best performance for common cases** - O(1) bitwise operations for first 64 flags per service
+2. **Unlimited scalability** - Path-based system handles everything beyond 64
+3. **Transparent optimization** - Developers use same API, manager handles the rest
+4. **Service-optimized** - Each service's most common flags automatically get bitflags
+5. **Backward compatible** - Existing bitflag code continues to work unchanged
+6. **Natural hierarchy** - Dot notation paths work for both bitflags and path-based
+7. **Pattern-friendly** - Glob patterns work seamlessly across both systems
 
 ### Performance Optimization Strategies
 
-1. **Path Tree Caching**: Build a tree structure for O(depth) hierarchical checks
-2. **Pattern Compilation**: Compile glob patterns to regex or trie structures
-3. **Hot Path Optimization**: Cache frequently checked paths
-4. **Lazy Evaluation**: Only compile patterns when first used
+1. **Automatic Bitflag Assignment**: First 64 registered paths per service get bitflags
+2. **Cached Path Tree**: Build a tree structure for O(1) to O(depth) hierarchical checks
+3. **Pattern Compilation**: Compile glob patterns to regex or trie structures
+4. **Hot Path Optimization**: Cache frequently checked paths
+5. **Lazy Evaluation**: Only compile patterns when first used
+6. **Service Isolation**: Each service can have its own set of 64 common flags
 
 ### Implementation Plan
 
-#### Phase 1: Path-Based Core
-- [ ] Implement `PathFlagManager` with map-based lookup
-- [ ] Add hierarchical path inheritance
-- [ ] Implement glob pattern matching with caching
-- [ ] Maintain backward compatibility with existing API
+#### Phase 1: Hybrid Core
+- [ ] Implement automatic bitflag assignment for first 64 registered paths
+- [ ] Build path tree for flags beyond 64
+- [ ] Add hierarchical path inheritance for both systems
+- [ ] Implement glob pattern matching with caching (works for both)
+- [ ] Maintain backward compatibility with existing bitflag API
+- [ ] Add transparent evaluation that chooses fastest method
 
 #### Phase 2: Performance Optimization
-- [ ] Build path tree for faster hierarchical checks
+- [ ] Optimize path tree lookup (cache frequently accessed paths)
 - [ ] Implement pattern compilation cache
-- [ ] Add hot path optimization
-- [ ] Benchmark and optimize critical paths
+- [ ] Add hot path optimization (track and optimize most-used paths)
+- [ ] Benchmark bitflag vs path tree performance
+- [ ] Consider dynamic promotion: promote frequently-used path flags to bitflags
 
 #### Phase 3: Lifecycle Integration
 - [ ] Integrate with lifecycle events library
