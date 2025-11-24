@@ -1081,12 +1081,13 @@ func main() {
 ┌─────────────────────────────────────────────────────────────────┐
 │              Configuration Management Platform                   │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │              Developer Portal (Web UI)                   │   │
+│  │         Developer Portal (SSH TUI - Bubble Tea/Wish)     │   │
 │  │  - Feature Flag Management                               │   │
 │  │  - Debug Flag Configuration                              │   │
 │  │  - Rollout Segment Management                            │   │
 │  │  - Log & Metrics Viewer                                  │   │
 │  │  - Rollback Interface                                    │   │
+│  │  - Real-time Updates                                    │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                           │                                       │
 │  ┌──────────────────────────────────────────────────────────┐   │
@@ -1219,6 +1220,26 @@ rollback:
 
 #### Register Feature Flag
 
+**Via SSH TUI:**
+```bash
+ssh config-platform.example.com
+# Navigate to Feature Flags view (press 'f')
+# Press 'n' to create new flag
+# Fill in the form interactively
+```
+
+**Via CLI:**
+```bash
+config-platform flags create \
+  --name new_checkout_flow \
+  --description "Enable new checkout experience" \
+  --owner team:payments \
+  --services payments-api,checkout-service \
+  --rollout-strategy canary \
+  --rollout-segment internal-users:10
+```
+
+**Via API (for automation):**
 ```bash
 curl -X POST https://config-platform.example.com/api/v1/feature-flags \
   -H "Content-Type: application/json" \
@@ -1239,6 +1260,25 @@ curl -X POST https://config-platform.example.com/api/v1/feature-flags \
 
 #### Enable Debug Flags with Rollout
 
+**Via SSH TUI:**
+```bash
+ssh config-platform.example.com
+# Navigate to Debug Flags view (press 'd')
+# Press 'n' to create new debug configuration
+# Select services, enter flags, set expiration
+```
+
+**Via CLI:**
+```bash
+config-platform debug create \
+  --name troubleshoot-payment-issue \
+  --flags "payments.process|db.transaction" \
+  --services payments-api \
+  --target production-pod-abc \
+  --expires-at "2025-01-25T18:00:00Z"
+```
+
+**Via API (for automation):**
 ```bash
 curl -X POST https://config-platform.example.com/api/v1/debug-flags \
   -H "Content-Type: application/json" \
@@ -1258,6 +1298,24 @@ curl -X POST https://config-platform.example.com/api/v1/debug-flags \
 
 #### Perform Rollback
 
+**Via SSH TUI:**
+```bash
+ssh config-platform.example.com
+# Navigate to Rollouts view (press 'r')
+# Select the rollout to rollback
+# Press 'b' for rollback
+# Preview changes, confirm with 'y'
+```
+
+**Via CLI:**
+```bash
+config-platform rollback new_checkout_flow \
+  --from-version v2.1.0 \
+  --to-version v2.0.5 \
+  --reason "High error rate detected"
+```
+
+**Via API (for automation):**
 ```bash
 curl -X POST https://config-platform.example.com/api/v1/rollbacks \
   -H "Content-Type: application/json" \
@@ -1279,6 +1337,34 @@ curl https://config-platform.example.com/api/v1/services/payments-api/config \
 
 #### View Logs and Metrics
 
+**Via SSH TUI:**
+```bash
+ssh config-platform.example.com
+# Navigate to Logs view (press 'l')
+# Filter by service: payments-api
+# Filter by debug flags: payments.process
+# Press 'f' to follow (like tail -f)
+
+# Navigate to Metrics view (press 'm')
+# Select rollout: canary-10-percent
+# View time range: 24h
+```
+
+**Via CLI:**
+```bash
+# View logs
+config-platform logs payments-api \
+  --debug-flags "payments.process" \
+  --time-range 1h \
+  --follow
+
+# View metrics
+config-platform metrics \
+  --rollout canary-10-percent \
+  --time-range 24h
+```
+
+**Via API (for automation):**
 ```bash
 # View logs for a service with specific debug flags enabled
 curl "https://config-platform.example.com/api/v1/services/payments-api/logs?debug_flags=payments.process&time_range=1h" \
@@ -1320,20 +1406,270 @@ type ConfigurationUpdate struct {
 }
 ```
 
-### Web UI Features
+### SSH TUI Interface (Bubble Tea/Wish)
 
-The developer portal provides:
+The developer portal is built as a terminal UI accessible via SSH, using [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Wish](https://github.com/charmbracelet/wish) for the SSH server. This provides a rich, interactive terminal experience without requiring a JavaScript frontend.
 
-1. **Dashboard**: Overview of all active configurations, rollouts, and alerts
-2. **Feature Flag Manager**: Create, edit, enable/disable feature flags with rollout controls
-3. **Debug Flag Manager**: Configure debug flags with expiration and targeted rollouts
-4. **Rollout Manager**: Create and manage rollout segments (canary, blue-green, percentage-based)
-5. **Rollback Interface**: One-click rollback with preview of changes
-6. **Log Viewer**: Real-time log streaming with filtering by service, debug flags, correlation ID
-7. **Metrics Dashboard**: Visualize metrics for services, rollouts, and configurations
-8. **Audit Log**: View all configuration changes with who, what, when, why
-9. **Service Registry**: View all registered services and their current configuration
-10. **Alerting**: Set up alerts for configuration drift, rollout issues, or service health
+#### Access
+
+```bash
+# SSH into the configuration platform
+ssh config-platform.example.com
+
+# Or use the CLI tool
+config-platform connect
+
+# Authenticate with your credentials
+# Platform uses IAM for authentication
+```
+
+#### TUI Features
+
+The terminal UI provides:
+
+1. **Dashboard View**: Overview of all active configurations, rollouts, and alerts
+   - Color-coded status indicators
+   - Real-time updates via WebSocket/SSH channel
+   - Keyboard shortcuts for navigation
+
+2. **Feature Flag Manager**: Create, edit, enable/disable feature flags
+   - Interactive forms for flag creation
+   - Rollout controls with visual progress bars
+   - Search and filter capabilities
+
+3. **Debug Flag Manager**: Configure debug flags with expiration
+   - Targeted rollout selection
+   - Expiration time picker
+   - Service selection with checkboxes
+
+4. **Rollout Manager**: Create and manage rollout segments
+   - Visual representation of rollout percentages
+   - Canary, blue-green, percentage-based strategies
+   - Real-time rollout status
+
+5. **Rollback Interface**: One-keystroke rollback with preview
+   - Side-by-side diff view
+   - Confirmation dialog
+   - Rollback history
+
+6. **Log Viewer**: Real-time log streaming
+   - Filter by service, debug flags, correlation ID
+   - Color-coded log levels
+   - Search and highlight
+   - Follow mode (like `tail -f`)
+
+7. **Metrics Dashboard**: Visualize metrics
+   - ASCII charts and graphs
+   - Time-series data visualization
+   - Service and rollout metrics
+
+8. **Audit Log**: View all configuration changes
+   - Timeline view
+   - Filter by user, service, type
+   - Detailed change diffs
+
+9. **Service Registry**: View all registered services
+   - Service health status
+   - Current configuration per service
+   - Service discovery information
+
+10. **Alerting**: View and manage alerts
+    - Alert list with severity indicators
+    - Alert details and history
+    - Acknowledge and resolve alerts
+
+#### TUI Implementation Example
+
+```go
+// config-platform/cmd/tui/main.go
+package main
+
+import (
+	"os"
+	
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+type model struct {
+	// Current view state
+	view      string
+	// Data models
+	flags     []FeatureFlag
+	services  []Service
+	// UI state
+	cursor    int
+	selected  map[int]struct{}
+}
+
+func (m model) Init() tea.Cmd {
+	return tea.Batch(
+		loadFeatureFlags(),
+		loadServices(),
+	)
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q":
+			return m, tea.Quit
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.flags)-1 {
+				m.cursor++
+			}
+		case "enter", " ":
+			// Toggle selection or navigate
+		case "f":
+			// Switch to feature flags view
+			m.view = "feature-flags"
+		case "d":
+			// Switch to debug flags view
+			m.view = "debug-flags"
+		case "r":
+			// Switch to rollouts view
+			m.view = "rollouts"
+		case "l":
+			// Switch to logs view
+			m.view = "logs"
+		case "m":
+			// Switch to metrics view
+			m.view = "metrics"
+		}
+	}
+	return m, nil
+}
+
+func (m model) View() string {
+	switch m.view {
+	case "dashboard":
+		return m.dashboardView()
+	case "feature-flags":
+		return m.featureFlagsView()
+	case "debug-flags":
+		return m.debugFlagsView()
+	case "rollouts":
+		return m.rolloutsView()
+	case "logs":
+		return m.logsView()
+	case "metrics":
+		return m.metricsView()
+	default:
+		return m.dashboardView()
+	}
+}
+
+func main() {
+	p := tea.NewProgram(model{
+		view:     "dashboard",
+		selected: make(map[int]struct{}),
+	}, tea.WithAltScreen())
+	
+	if _, err := p.Run(); err != nil {
+		os.Exit(1)
+	}
+}
+```
+
+#### SSH Server with Wish
+
+```go
+// config-platform/cmd/ssh-server/main.go
+package main
+
+import (
+	"log"
+	
+	"github.com/charmbracelet/wish"
+	"github.com/charmbracelet/wish/activeterm"
+	"github.com/charmbracelet/wish/bubbletea"
+	"github.com/charmbracelet/wish/logging"
+	"github.com/gliderlabs/ssh"
+)
+
+func main() {
+	s, err := wish.NewServer(
+		wish.WithAddress(":2222"),
+		wish.WithHostKeyPath(".ssh/term_info_ed25519"),
+		wish.WithMiddleware(
+			activeterm.Middleware(), // Ensure terminal is active
+			bubbletea.Middleware(teaHandler), // Bubble Tea handler
+			logging.Middleware(), // Logging
+		),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	
+	log.Printf("SSH server running on %s", s.Addr)
+	if err = s.ListenAndServe(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
+	// Authenticate user via IAM
+	user := s.User()
+	if !authenticate(user) {
+		return nil, nil
+	}
+	
+	// Create initial model with user context
+	m := model{
+		user: user,
+		view: "dashboard",
+	}
+	
+	return m, []tea.ProgramOption{tea.WithAltScreen()}
+}
+```
+
+#### CLI Tool Integration
+
+The platform also provides a CLI tool for programmatic access:
+
+```bash
+# List all feature flags
+config-platform flags list
+
+# Enable a feature flag
+config-platform flags enable new_checkout_flow --segment canary-10-percent
+
+# View logs
+config-platform logs payments-api --follow --filter "debug_flags=payments.process"
+
+# View metrics
+config-platform metrics payments-api --time-range 1h
+
+# Perform rollback
+config-platform rollback new_checkout_flow --to-version v2.0.5
+
+# Connect to TUI
+config-platform connect
+```
+
+#### Benefits of SSH TUI Approach
+
+1. **No Frontend Development**: Avoid JavaScript/React complexity for now
+2. **Fast Development**: Bubble Tea provides rich TUI capabilities quickly
+3. **SSH Access**: Works over SSH, no need for web infrastructure
+4. **Terminal Native**: Developers comfortable with terminal tools
+5. **Lightweight**: Minimal dependencies, fast startup
+6. **Keyboard-Driven**: Efficient for power users
+7. **Future-Proof**: Can add web UI later without changing backend
+
+#### Future: Web UI Migration
+
+When ready to build a web UI:
+- The backend API remains unchanged
+- Web UI can consume the same gRPC/REST APIs
+- TUI and Web UI can coexist
+- Gradual migration path
 
 ### Security and Authorization
 
