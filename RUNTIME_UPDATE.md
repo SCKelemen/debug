@@ -1,6 +1,6 @@
 # Runtime Configuration Management
 
-This document describes how to update runtime configuration at runtime without restarting services, enabling dynamic control of:
+This document describes the unified runtime configuration management system, similar to Spotify's Backstage, where developers can manage all runtime configuration through a centralized portal. The system enables dynamic control of:
 - **Debug Flags**: Enable/disable debug logging for specific paths
 - **Lifecycle Logging**: Control lifecycle event emission levels
 - **Feature Flags**: Enable/disable features dynamically
@@ -17,14 +17,40 @@ When debugging production issues or managing runtime behavior, you need to updat
 - Redeploying (slow, risky)
 - Changing code (not possible in production)
 
-## Unified Runtime Configuration
+## Architecture Overview
 
-All runtime configuration should be managed through a unified interface that supports:
-1. **HTTP Admin Endpoint** (Recommended)
-2. **gRPC Admin Service**
-3. **Signal Handler** (SIGHUP to reload from file)
-4. **File Watcher** (watch config file for changes)
-5. **Configuration Service** (poll/watch external config)
+The runtime configuration system consists of two layers:
+
+### 1. Central Configuration Management Platform (Backstage-style)
+
+A unified developer portal where developers can:
+- **Register and manage feature flags** across all services
+- **Enable/disable debug flags** with rollout segments
+- **Configure rollout strategies** (canary, blue-green, percentage-based)
+- **Perform rollbacks** with one-click revert
+- **View logs and metrics** in real-time
+- **Manage authentication/authorization** settings
+- **Monitor configuration changes** with audit trails
+- **Create configuration templates** for common scenarios
+- **Set up alerts** for configuration drift or issues
+
+### 2. Service-Level Runtime Configuration
+
+Each service exposes runtime configuration endpoints that:
+1. **Receive updates** from the central platform
+2. **Apply changes** immediately without restart
+3. **Report status** back to the platform
+4. **Support local overrides** for development/testing
+5. **Emit lifecycle events** for all configuration changes
+
+## Configuration Update Mechanisms
+
+Services support multiple mechanisms for receiving configuration updates:
+1. **HTTP Admin Endpoint** (Primary - receives updates from platform)
+2. **gRPC Admin Service** (For high-throughput scenarios)
+3. **Signal Handler** (SIGHUP to reload from file - fallback)
+4. **File Watcher** (Watch config file for changes - local development)
+5. **Configuration Service Polling** (Poll central platform for updates)
 
 ## Solution: Unified Runtime Configuration
 
@@ -1046,6 +1072,297 @@ func main() {
    - `allow_expired` exemptions should be used with extreme caution
    - Always verify exemption signatures in production
    - Monitor authorization failures and policy cache staleness
+
+## Central Configuration Management Platform
+
+### Platform Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Configuration Management Platform                   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │              Developer Portal (Web UI)                   │   │
+│  │  - Feature Flag Management                               │   │
+│  │  - Debug Flag Configuration                              │   │
+│  │  - Rollout Segment Management                            │   │
+│  │  - Log & Metrics Viewer                                  │   │
+│  │  - Rollback Interface                                    │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                           │                                       │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │              Configuration API (gRPC/REST)                │   │
+│  │  - Register/Update Configuration                         │   │
+│  │  - Query Current State                                   │   │
+│  │  - Rollback Operations                                   │   │
+│  │  - Audit Log Access                                      │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                           │                                       │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │              Configuration Store                          │   │
+│  │  - Feature Flags Registry                                │   │
+│  │  - Debug Flags Registry                                  │   │
+│  │  - Rollout Segments                                      │   │
+│  │  - Configuration History                                 │   │
+│  │  - Service Registry                                       │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                           │                                       │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │              Distribution Layer                            │   │
+│  │  - Push updates to services (gRPC streaming)              │   │
+│  │  - Polling fallback                                       │   │
+│  │  - Service discovery                                      │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+┌───────▼──────┐  ┌────────▼────────┐  ┌─────▼──────┐
+│  Service A   │  │   Service B      │  │ Service C  │
+│  (Runtime    │  │   (Runtime       │  │ (Runtime    │
+│   Config)    │  │    Config)      │  │  Config)    │
+└──────────────┘  └─────────────────┘  └────────────┘
+```
+
+### Platform Features
+
+#### 1. Feature Flag Management
+
+```yaml
+# Feature flag definition in platform
+feature_flag:
+  name: "new_checkout_flow"
+  description: "Enable new checkout experience"
+  owner: "team:payments"
+  services:
+    - "payments-api"
+    - "checkout-service"
+  rollout:
+    strategy: "canary"
+    segments:
+      - name: "internal-users"
+        percentage: 10
+        enabled: true
+      - name: "beta-users"
+        percentage: 5
+        enabled: true
+      - name: "production"
+        percentage: 0
+        enabled: false
+  metadata:
+    created_at: "2025-01-25T10:00:00Z"
+    created_by: "user:alice"
+    jira_ticket: "PAY-1234"
+```
+
+#### 2. Debug Flag Management
+
+```yaml
+# Debug flag configuration with rollout segments
+debug_flags:
+  name: "troubleshoot-payment-issue"
+  description: "Enable detailed logging for payment processing"
+  owner: "team:payments"
+  flags: "payments.process|db.transaction|http.request"
+  services:
+    - "payments-api"
+  rollout:
+    strategy: "targeted"
+    segments:
+      - name: "production-pod-abc"
+        enabled: true
+        expires_at: "2025-01-25T18:00:00Z"
+      - name: "staging"
+        enabled: true
+  metadata:
+    created_at: "2025-01-25T14:00:00Z"
+    created_by: "user:bob"
+    incident: "INC-5678"
+```
+
+#### 3. Rollout Segments
+
+```yaml
+# Rollout segment definition
+rollout_segment:
+  name: "canary-10-percent"
+  description: "10% of production traffic"
+  strategy: "percentage"
+  percentage: 10
+  selector:
+    labels:
+      - key: "environment"
+        value: "production"
+    random: true  # Random selection or specific criteria
+  services:
+    - "payments-api"
+    - "checkout-service"
+```
+
+#### 4. Rollback Management
+
+```yaml
+# Rollback configuration
+rollback:
+  target: "feature_flag:new_checkout_flow"
+  from_version: "v2.1.0"
+  to_version: "v2.0.5"
+  reason: "High error rate detected"
+  initiated_by: "user:charlie"
+  initiated_at: "2025-01-25T16:00:00Z"
+  status: "in_progress"
+  services_affected:
+    - "payments-api"
+    - "checkout-service"
+```
+
+### Platform API Examples
+
+#### Register Feature Flag
+
+```bash
+curl -X POST https://config-platform.example.com/api/v1/feature-flags \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "name": "new_checkout_flow",
+    "description": "Enable new checkout experience",
+    "owner": "team:payments",
+    "services": ["payments-api", "checkout-service"],
+    "rollout": {
+      "strategy": "canary",
+      "segments": [
+        {"name": "internal-users", "percentage": 10, "enabled": true}
+      ]
+    }
+  }'
+```
+
+#### Enable Debug Flags with Rollout
+
+```bash
+curl -X POST https://config-platform.example.com/api/v1/debug-flags \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "name": "troubleshoot-payment-issue",
+    "flags": "payments.process|db.transaction",
+    "services": ["payments-api"],
+    "rollout": {
+      "strategy": "targeted",
+      "segments": [
+        {"name": "production-pod-abc", "enabled": true, "expires_at": "2025-01-25T18:00:00Z"}
+      ]
+    }
+  }'
+```
+
+#### Perform Rollback
+
+```bash
+curl -X POST https://config-platform.example.com/api/v1/rollbacks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "target": "feature_flag:new_checkout_flow",
+    "from_version": "v2.1.0",
+    "to_version": "v2.0.5",
+    "reason": "High error rate detected"
+  }'
+```
+
+#### Query Service Configuration
+
+```bash
+curl https://config-platform.example.com/api/v1/services/payments-api/config \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### View Logs and Metrics
+
+```bash
+# View logs for a service with specific debug flags enabled
+curl "https://config-platform.example.com/api/v1/services/payments-api/logs?debug_flags=payments.process&time_range=1h" \
+  -H "Authorization: Bearer $TOKEN"
+
+# View metrics for a rollout segment
+curl "https://config-platform.example.com/api/v1/rollouts/canary-10-percent/metrics?time_range=24h" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Service Integration
+
+Services register with the platform and receive configuration updates via gRPC streaming:
+
+```go
+// Service registration and configuration streaming
+type ConfigPlatformClient interface {
+    // Register service with platform
+    RegisterService(ctx context.Context, service ServiceInfo) error
+    
+    // Stream configuration updates
+    StreamConfiguration(ctx context.Context, serviceID string) (<-chan ConfigurationUpdate, error)
+    
+    // Report configuration status
+    ReportStatus(ctx context.Context, serviceID string, status ConfigurationStatus) error
+    
+    // Request full configuration snapshot
+    RequestSnapshot(ctx context.Context, serviceID string) (*Configuration, error)
+}
+
+// Configuration update from platform
+type ConfigurationUpdate struct {
+    Type      string                 // "feature_flag", "debug_flag", "auth", etc.
+    Name      string
+    Action    string                 // "enable", "disable", "update"
+    Config    map[string]interface{} // Configuration data
+    Segment   string                 // Rollout segment name
+    Timestamp time.Time
+}
+```
+
+### Web UI Features
+
+The developer portal provides:
+
+1. **Dashboard**: Overview of all active configurations, rollouts, and alerts
+2. **Feature Flag Manager**: Create, edit, enable/disable feature flags with rollout controls
+3. **Debug Flag Manager**: Configure debug flags with expiration and targeted rollouts
+4. **Rollout Manager**: Create and manage rollout segments (canary, blue-green, percentage-based)
+5. **Rollback Interface**: One-click rollback with preview of changes
+6. **Log Viewer**: Real-time log streaming with filtering by service, debug flags, correlation ID
+7. **Metrics Dashboard**: Visualize metrics for services, rollouts, and configurations
+8. **Audit Log**: View all configuration changes with who, what, when, why
+9. **Service Registry**: View all registered services and their current configuration
+10. **Alerting**: Set up alerts for configuration drift, rollout issues, or service health
+
+### Security and Authorization
+
+The platform integrates with IAM for authorization:
+
+```yaml
+# Platform permissions
+permissions:
+  - "config.feature_flag.create"
+  - "config.feature_flag.update"
+  - "config.feature_flag.delete"
+  - "config.debug_flag.create"
+  - "config.debug_flag.update"
+  - "config.rollout.create"
+  - "config.rollout.update"
+  - "config.rollback.execute"
+  - "config.logs.view"
+  - "config.metrics.view"
+  - "config.audit.view"
+```
+
+### Configuration Distribution
+
+The platform distributes configuration updates to services via:
+
+1. **gRPC Streaming** (Primary): Real-time push of configuration updates
+2. **Polling Fallback**: Services poll platform if streaming unavailable
+3. **Service Discovery**: Platform discovers services via service registry
+4. **Segment Targeting**: Updates only sent to services matching rollout segments
 
 ---
 
