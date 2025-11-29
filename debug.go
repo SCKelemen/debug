@@ -157,13 +157,6 @@ func (s Severity) String() string {
 	}
 }
 
-// FlagDefinition represents a debug flag definition
-type FlagDefinition struct {
-	Flag DebugFlag
-	Name string
-	Path string
-}
-
 // PathSeverityFilter represents a severity filter for a specific path pattern
 type PathSeverityFilter struct {
 	Pattern string
@@ -192,6 +185,7 @@ type DebugManager struct {
 	parser               FlagParser
 	flagMap              map[string]DebugFlag
 	pathMap              map[DebugFlag]string
+	colorMap             map[string]string // path -> color (from API generator annotations)
 	allFlags             []DebugFlag
 	enabledFlags         DebugFlag
 	pathSeverityFilters  []PathSeverityFilter
@@ -203,30 +197,41 @@ type DebugManager struct {
 // NewDebugManager creates a new debug manager with the specified parser
 func NewDebugManager(parser FlagParser) *DebugManager {
 	return &DebugManager{
-		parser:  parser,
-		flagMap: make(map[string]DebugFlag),
-		pathMap: make(map[DebugFlag]string),
+		parser:   parser,
+		flagMap:  make(map[string]DebugFlag),
+		pathMap:  make(map[DebugFlag]string),
+		colorMap: make(map[string]string),
 	}
 }
 
 // NewDebugManagerWithSlog creates a new debug manager with slog integration
 func NewDebugManagerWithSlog(parser FlagParser) *DebugManager {
 	return &DebugManager{
-		parser:  parser,
-		flagMap: make(map[string]DebugFlag),
-		pathMap: make(map[DebugFlag]string),
-		logger:  slog.Default(),
+		parser:   parser,
+		flagMap:  make(map[string]DebugFlag),
+		pathMap:  make(map[DebugFlag]string),
+		colorMap: make(map[string]string),
+		logger:   slog.Default(),
 	}
 }
 
 // NewDebugManagerWithSlogHandler creates a new debug manager with a custom slog handler
 func NewDebugManagerWithSlogHandler(parser FlagParser, handler slog.Handler) *DebugManager {
 	return &DebugManager{
-		parser:  parser,
-		flagMap: make(map[string]DebugFlag),
-		pathMap: make(map[DebugFlag]string),
-		logger:  slog.New(handler),
+		parser:   parser,
+		flagMap:  make(map[string]DebugFlag),
+		pathMap:  make(map[DebugFlag]string),
+		colorMap: make(map[string]string),
+		logger:   slog.New(handler),
 	}
+}
+
+// FlagDefinition represents a debug flag definition
+type FlagDefinition struct {
+	Name  string
+	Flag  DebugFlag
+	Path  string
+	Color string // Optional: color from API generator annotations
 }
 
 // RegisterFlags registers debug flags with the manager
@@ -237,8 +242,26 @@ func (dm *DebugManager) RegisterFlags(definitions []FlagDefinition) {
 	for _, def := range definitions {
 		dm.flagMap[def.Name] = def.Flag
 		dm.pathMap[def.Flag] = def.Path
+		if def.Color != "" {
+			dm.colorMap[def.Path] = def.Color
+		}
 		dm.allFlags = append(dm.allFlags, def.Flag)
 	}
+}
+
+// RegisterPathColor registers a color for a debug path
+// Colors come from API generator type/event annotations
+func (dm *DebugManager) RegisterPathColor(path, color string) {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	dm.colorMap[path] = color
+}
+
+// GetPathColor returns the color for a debug path, or empty string if not found
+func (dm *DebugManager) GetPathColor(path string) string {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+	return dm.colorMap[path]
 }
 
 // SetFlags sets the debug flags from a string using the configured parser
@@ -327,6 +350,13 @@ func (dm *DebugManager) LogWithMethodContextAndSeverity(methodFlags DebugFlag, f
 		message := fmt.Sprintf(format, args...)
 		path := dm.getPathForCombinedFlags(flag)
 
+		// Get color for path if available
+		pathColor := dm.GetPathColor(path)
+		styledPath := path
+		if pathColor != "" {
+			styledPath = formatPathWithColor(path, pathColor)
+		}
+
 		if dm.logger != nil {
 			// Use structured logging with slog
 			attrs := []slog.Attr{
@@ -336,14 +366,17 @@ func (dm *DebugManager) LogWithMethodContextAndSeverity(methodFlags DebugFlag, f
 			if contextStr != "" {
 				attrs = append(attrs, slog.String("context", contextStr))
 			}
+			if pathColor != "" {
+				attrs = append(attrs, slog.String("color", pathColor))
+			}
 
 			dm.logger.LogAttrs(nil, dm.severityToSlogLevel(severity), message, attrs...)
 		} else {
-			// Use traditional logging
+			// Use traditional logging with color
 			if contextStr != "" {
-				fmt.Fprintf(os.Stderr, "%s [%s] %s: %s\n", severity.String(), path, contextStr, message)
+				fmt.Fprintf(os.Stderr, "%s [%s] %s: %s\n", severity.String(), styledPath, contextStr, message)
 			} else {
-				fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), path, message)
+				fmt.Fprintf(os.Stderr, "%s [%s]: %s\n", severity.String(), styledPath, message)
 			}
 		}
 	}
@@ -354,6 +387,13 @@ func (dm *DebugManager) LogWithMethodContextAndSeverityAndAttrs(methodFlags Debu
 	if dm.shouldLogWithMethodContext(methodFlags, flag, severity) {
 		path := dm.getPathForCombinedFlags(flag)
 
+		// Get color for path if available
+		pathColor := dm.GetPathColor(path)
+		styledPath := path
+		if pathColor != "" {
+			styledPath = formatPathWithColor(path, pathColor)
+		}
+
 		if dm.logger != nil {
 			// Use structured logging with slog
 			allAttrs := []slog.Attr{
@@ -363,16 +403,19 @@ func (dm *DebugManager) LogWithMethodContextAndSeverityAndAttrs(methodFlags Debu
 			if contextStr != "" {
 				allAttrs = append(allAttrs, slog.String("context", contextStr))
 			}
+			if pathColor != "" {
+				allAttrs = append(allAttrs, slog.String("color", pathColor))
+			}
 			// Add user-provided attributes
 			allAttrs = append(allAttrs, attrs...)
 
 			dm.logger.LogAttrs(nil, dm.severityToSlogLevel(severity), message, allAttrs...)
 		} else {
-			// Use traditional logging
+			// Use traditional logging with color
 			if contextStr != "" {
-				fmt.Fprintf(os.Stderr, "%s [%s] %s: %s", severity.String(), path, contextStr, message)
+				fmt.Fprintf(os.Stderr, "%s [%s] %s: %s", severity.String(), styledPath, contextStr, message)
 			} else {
-				fmt.Fprintf(os.Stderr, "%s [%s]: %s", severity.String(), path, message)
+				fmt.Fprintf(os.Stderr, "%s [%s]: %s", severity.String(), styledPath, message)
 			}
 			// Print structured attributes in traditional format
 			if len(attrs) > 0 {
@@ -517,7 +560,7 @@ func (dm *DebugManager) IsSlogEnabled() bool {
 func (dm *DebugManager) GetEnabledFlags() []string {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
-	
+
 	var enabled []string
 	for name, flag := range dm.flagMap {
 		if dm.enabledFlags&flag != 0 {
@@ -531,7 +574,7 @@ func (dm *DebugManager) GetEnabledFlags() []string {
 func (dm *DebugManager) GetAvailableFlags() []string {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
-	
+
 	var available []string
 	for name := range dm.flagMap {
 		available = append(available, name)
@@ -564,4 +607,18 @@ func (dm *DebugManager) severityToSlogLevel(severity Severity) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// formatPathWithColor formats a path with color using ANSI escape codes
+// This is a simple implementation - for full lipgloss support, integrate with lifecycle library
+func formatPathWithColor(path, color string) string {
+	// Simple ANSI color formatting
+	// For full support, use lipgloss from lifecycle library
+	if color == "" {
+		return path
+	}
+	// For now, just return the path with a simple color indicator
+	// Full implementation would use lipgloss.Color() to convert hex to ANSI
+	// This is a placeholder - in production, integrate with lifecycle library's FormatWithColor
+	return fmt.Sprintf("%s", path) // TODO: Add proper color formatting
 }
